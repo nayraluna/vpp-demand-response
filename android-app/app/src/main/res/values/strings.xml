@@ -1,0 +1,117 @@
+<resources>
+    <string name="app_name">TFG VPP</string>
+
+    <!-- Common -->
+    <string name="common_back">Back</string>
+    <string name="common_retry">Retry</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="error_generic">Error: %1$s</string>
+
+    <!-- Login -->
+    <string name="login_title">Virtual Power Plant</string>
+    <string name="login_explanation">Earn rewards when your appliances support the grid.</string>
+    <string name="login_dnie_button">Sign in with DNIe</string>
+    <string name="login_dnie_identity">%1$s (%2$s)</string>
+    <string name="login_discard_identity">Discard this identity</string>
+    <string name="login_register_button">Create account</string>
+    <string name="login_register_test_button">Use a test identity (no DNIe)</string>
+    <string name="login_registering">Issuing your credential…</string>
+
+    <!-- Home -->
+    <string name="home_title">My appliances</string>
+    <string name="home_refresh">Refresh</string>
+    <string name="home_history">Participation history</string>
+    <string name="home_profile">Profile</string>
+    <string name="home_add">Add appliance</string>
+    <string name="home_empty_title">No appliances yet</string>
+    <string name="home_empty">Tap + to pair one by scanning its QR code.</string>
+    <string name="home_power_format">Nominal power: %1$d W</string>
+    <string name="home_availability_declared">Availability set</string>
+    <string name="home_availability_missing">No availability set</string>
+
+    <!-- Pairing -->
+    <string name="pairing_title">Pair appliance</string>
+    <string name="pairing_explanation">Scan the QR code printed on the appliance.</string>
+    <string name="pairing_scan">Scan appliance QR</string>
+    <string name="pairing_scan_prompt">Point the camera at the appliance QR</string>
+    <string name="pairing_dev_appliance">Use PC appliance</string>
+    <string name="pairing_step_connecting">Connecting to the appliance</string>
+    <string name="pairing_step_delivering">Delivering signed configuration</string>
+    <string name="pairing_step_verifying">Verifying owner proof</string>
+    <string name="pairing_step_registering">Registering at the VPP</string>
+    <string name="pairing_step_refreshing">Updating the list</string>
+    <string name="pairing_success">Appliance paired</string>
+    <string name="pairing_checks_title">Owner proof checks</string>
+    <string name="check_signature">Valid HSM signature</string>
+    <string name="check_chain">Certificate chains to the CA</string>
+    <string name="check_owner">Owner is me</string>
+    <string name="check_power">Power matches the certified value</string>
+    <string name="pairing_error_title">Pairing failed</string>
+    <string name="pairing_factory_reset">Factory reset the appliance</string>
+    <string name="pairing_reset_done">Appliance reset: try again</string>
+    <string name="pairing_done">Done</string>
+
+    <!-- Appliance detail -->
+    <string name="detail_title">Appliance detail</string>
+    <string name="detail_certified_caption">Certified parameters</string>
+    <string name="detail_ven">Identity (VEN)</string>
+    <string name="detail_power">Nominal power</string>
+    <string name="detail_power_value">%1$d W</string>
+    <string name="detail_max_curtail">Max curtailment</string>
+    <string name="detail_minutes_value">%1$d min</string>
+    <string name="detail_recovery">Recovery period</string>
+    <string name="detail_availability">Availability</string>
+    <string name="detail_availability_button">Edit availability</string>
+    <string name="detail_not_found">Appliance not found</string>
+
+    <!-- Availability -->
+    <string name="availability_title">Weekly availability</string>
+    <string name="availability_help">Tap an hour, or long-press and drag to paint several. Tap a day letter to fill or clear that day.</string>
+    <string name="availability_save">Save</string>
+    <string name="availability_saved">Availability saved</string>
+    <string name="availability_hours">%1$d hours/week allowed</string>
+    <string name="availability_legend_on">Curtailment allowed</string>
+    <string name="availability_legend_off">Not allowed</string>
+    <string name="day_mon">M</string>
+    <string name="day_tue">T</string>
+    <string name="day_wed">W</string>
+    <string name="day_thu">T</string>
+    <string name="day_fri">F</string>
+    <string name="day_sat">S</string>
+    <string name="day_sun">S</string>
+
+    <!-- Participation history -->
+    <string name="participation_title">Participations</string>
+    <string name="participation_total_title">Total verified savings</string>
+    <string name="participation_total_reward">%1$.2f €</string>
+    <string name="participation_total_energy">%1$.2f kWh not consumed</string>
+    <string name="participation_price">Reference price: %1$.2f €/kWh</string>
+    <string name="participation_empty">No verified participations yet.</string>
+    <string name="participation_verified">Verified</string>
+    <string name="participation_record_line">%1$s %2$s · %3$s −%4$d%%</string>
+    <string name="participation_record_saving">%1$.2f kWh → %2$.2f €</string>
+    <string name="participation_chart_title">Energy saved per event (kWh)</string>
+    <string name="participation_chart_subset">%1$d most recent of %2$d</string>
+
+    <!-- Profile -->
+    <string name="profile_title">Profile</string>
+    <string name="profile_holder">Holder</string>
+    <string name="profile_test_identity">Test identity (no DNIe)</string>
+    <string name="profile_dni">DNI</string>
+    <string name="profile_subject">Platform certificate</string>
+    <string name="profile_serial">Serial (CA)</string>
+    <string name="profile_status">Credential status</string>
+    <string name="profile_status_valid">Valid</string>
+    <string name="profile_status_invalid">Invalid</string>
+    <string name="profile_enroll_status">VPP account</string>
+    <string name="profile_logout">Log out</string>
+    <string name="profile_logout_confirm_title">Log out?</string>
+    <string name="profile_logout_confirm_text">Your credential and its private key will be deleted. You will need to register again.</string>
+
+    <!-- DNIe login -->
+    <string name="dnie_title">DNIe sign-in</string>
+    <string name="dnie_can_label">CAN (6 digits, printed on the front of your DNIe)</string>
+    <string name="dnie_status_initial">Enter the CAN and hold your DNIe against the back of the phone</string>
+    <string name="dnie_use_identity">Use this identity</string>
+
+</resources>

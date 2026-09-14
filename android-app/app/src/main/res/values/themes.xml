@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- No action bar: the Compose screens draw their own top bars. Parent is
+         MaterialComponents (not AppCompat) because the FNMT SDK's PIN dialog
+         (PasswordUI) inflates Material widgets in DnieLoginActivity. -->
+    <style name="Theme.TfgVpp" parent="Theme.MaterialComponents.DayNight.NoActionBar" />
+
+    <!-- One cell of the 6-digit CAN code input on the DNIe screen. -->
+    <style name="CanCell">
+        <item name="android:layout_width">44dp</item>
+        <item name="android:layout_height">56dp</item>
+        <item name="android:layout_marginStart">4dp</item>
+        <item name="android:layout_marginEnd">4dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textSize">22sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:background">@drawable/bg_can_cell</item>
+    </style>
+</resources>
