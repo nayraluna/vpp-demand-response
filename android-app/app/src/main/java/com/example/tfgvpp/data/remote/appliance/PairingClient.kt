@@ -117,7 +117,7 @@ class PairingClient(caInput: InputStream, private val registration: Registration
         val parameters = listOf("P", "max", "rec")
             .associateWith { (claims[it] as Number).toLong() }
 
-        // The Manufacturer certifies the nominal power inside the VEN certificate
+        // The CA certifies the nominal power inside the VEN certificate
         // (OU=P=<watts>); the proof must declare the same value. The OU is read
         // from the ASN.1 name directly: string forms escape the inner '='.
         val venSubject = venCert.subjectX500Principal.getName(X500Principal.RFC2253)

@@ -79,7 +79,7 @@ class RegistrationClient(caInput: InputStream) {
      * Runs the two exchanges of user registration against the live services.
      *
      * @param commonName subject CN the RA will certify (e.g. "android-3f9c21").
-     * @param raUrl      Manufacturer/RA base URL (port 8081).
+     * @param raUrl      CA base URL, registration authority side (port 8081).
      * @param vppUrl     VPP server-authenticated base URL (port 8080).
      * @param keyPair    the user's key pair. On the phone it is generated
      *                   inside the Android Keystore (CredentialStore), so the

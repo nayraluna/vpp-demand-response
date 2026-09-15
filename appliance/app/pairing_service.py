@@ -96,7 +96,7 @@ def pair(jws_token: str) -> dict:
 
     # 5. Report our capabilities and produce the owner proof, signed in the HSM.
     parameters = {
-        "P": hsm.nominal_power(),   # certified by the Manufacturer in the cert
+        "P": hsm.nominal_power(),   # certified by the CA in the cert
         "max": cfg["max"],          # device property, from the config file
         "rec": cfg["rec"],
     }

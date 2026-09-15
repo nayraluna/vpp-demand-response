@@ -45,7 +45,7 @@ Check the services answer:
 
 ```powershell
 curl.exe -k https://127.0.0.1:8080/ping   # "service":"vpp"
-curl.exe -k https://127.0.0.1:8081/ping   # "service":"manufacturer"
+curl.exe -k https://127.0.0.1:8081/ping   # "service":"ca"
 curl.exe http://127.0.0.1:8082/ping       # "service":"appliance","state":1
 ```
 

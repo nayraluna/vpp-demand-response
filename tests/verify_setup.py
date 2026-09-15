@@ -93,7 +93,7 @@ def main():
     except InvalidSignature:
         ok("tampered message rejected")
 
-    print("G3: Manufacturer over TLS")
+    print("G3: CA over TLS")
     r = requests.get(f"{MAN}/ping", verify=CA_FILE)
     ok(f"/ping -> {r.json()}") if r.ok else die(r.text)
     r = requests.get(f"{MAN}/ra/certificate", verify=CA_FILE)

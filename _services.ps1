@@ -21,7 +21,7 @@ function Stop-ServicePorts {
 function Start-Services($py, $root) {
     $uvicorn = @("-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port")
     @(
-        Start-Process $py -PassThru -WindowStyle Hidden -WorkingDirectory "$root\manufacturer" -ArgumentList ($uvicorn + @("8081", "--ssl-keyfile", "../certs/server.key", "--ssl-certfile", "../certs/server.crt"))
+        Start-Process $py -PassThru -WindowStyle Hidden -WorkingDirectory "$root\ca" -ArgumentList ($uvicorn + @("8081", "--ssl-keyfile", "../certs/server.key", "--ssl-certfile", "../certs/server.crt"))
         Start-Process $py -PassThru -WindowStyle Hidden -WorkingDirectory "$root\vpp-server"   -ArgumentList ($uvicorn + @("8080", "--ssl-keyfile", "../certs/vpp.key", "--ssl-certfile", "../certs/vpp.crt"))
         Start-Process $py -PassThru -WindowStyle Hidden -WorkingDirectory "$root\vpp-server"   -ArgumentList @("mtls_server.py")
         Start-Process $py -PassThru -WindowStyle Hidden -WorkingDirectory "$root\appliance"    -ArgumentList ($uvicorn + @("8082"))

@@ -2,7 +2,7 @@
 # =============================================================================
 # SETUP PHASE - PKI generation
 #
-# The RA, hosted at the Manufacturer, acts as the platform Certificate
+# The RA, hosted at the CA service, acts as the platform Certificate
 # Authority (a self-signed root = the common trust anchor). It issues ONE
 # identity per protocol entity, matching the paper's Setup Phase (Sec. 3.1):
 #
@@ -59,7 +59,7 @@ if [ -n "${EXTRA_SAN_IPS:-}" ]; then
   echo "== extra SAN addresses: $EXTRA_SAN_IPS =="
 fi
 
-echo "== RA root CA (self-signed, hosted at Manufacturer) =="
+echo "== RA root CA (self-signed, hosted at the CA service) =="
 # The explicit CA extensions matter: Python 3.13 enables strict RFC 5280
 # validation by default (VERIFY_X509_STRICT), which rejects any chain whose
 # root lacks the keyUsage extension ("CA cert does not include key usage

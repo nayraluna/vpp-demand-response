@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "vpp-server"))
 from app import availability as av  # noqa: E402
 
 CA_FILE = str(ROOT / "certs" / "CA.crt")
-MAN, MTLS = "https://localhost:8081", "https://localhost:8443"
+CA, MTLS = "https://127.0.0.1:8081", "https://127.0.0.1:8443"
 KEY_FILE = Path(__file__).resolve().parent / "operator.key"
 CRT_FILE = Path(__file__).resolve().parent / "operator.crt"
 
@@ -32,7 +32,7 @@ def init_credential(force: bool = False) -> tuple[str, str]:
                x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "role=operator"),
            ]))
            .sign(key, hashes.SHA256()))
-    r = requests.post(f"{MAN}/ra/issue",
+    r = requests.post(f"{CA}/ra/issue",
                       json={"csr": csr.public_bytes(serialization.Encoding.PEM).decode()},
                       verify=CA_FILE)
     r.raise_for_status()

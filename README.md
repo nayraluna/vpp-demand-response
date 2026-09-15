@@ -21,7 +21,7 @@ This platform answers both with cryptography instead of surveillance. The user d
 | `android-app/` | User app: identity, pairing, availability, rewards | Kotlin, Jetpack Compose, Hilt |
 | `vpp-server/` | Coordinator, acts as the OpenADR **VTN** | Python, FastAPI + a mutual-TLS listener |
 | `appliance/` | The controllable load, acts as the OpenADR **VEN** | Python on a Raspberry Pi, software HSM |
-| `manufacturer/` | Certificate authority and issuance service | Python, FastAPI |
+| `ca/` | Certificate authority and issuance service | Python, FastAPI |
 | `backoffice/` | Synthetic fleet and DR-operator CLI | Python |
 
 ![Deployment topology. The home network holds the mobile app and the appliance, the platform holds the CA and the VPP. Every connection is opened from the home outwards, so nothing reaches into the house.](docs/deployment-topology.png)
@@ -30,7 +30,7 @@ This platform answers both with cryptography instead of surveillance. The user d
 
 Everything rests on a single X.509 trust root.
 
-**Identity is certified, not declared.** The appliance's nominal power lives in its certificate subject (`OU=P=2000`), set by the manufacturer. An appliance that over-declares its capacity is caught, because the value it signs must match the value the CA certified.
+**Identity is certified, not declared.** The appliance's nominal power lives in its certificate subject (`OU=P=2000`). An appliance that inflates it at pairing is caught, because the value it signs must match the one in the certificate it presents. Binding the two is what the check buys. Whether the certificate carried the true figure in the first place is the issuance gap below.
 
 **Every channel that crosses the network is mutually authenticated.** The listener reads the client certificate off the TLS socket and maps its subject to an account and a role, so authentication and authorisation stay separate.
 

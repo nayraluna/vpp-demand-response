@@ -18,7 +18,7 @@ app = FastAPI(title="Certificate Authority (CA)", version="0.2.0", lifespan=life
 
 @app.get("/ping")
 def ping() -> dict:
-    return {"status": "ok", "service": "manufacturer"}
+    return {"status": "ok", "service": "ca"}
 
 
 @app.get("/ra/certificate")

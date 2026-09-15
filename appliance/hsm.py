@@ -34,7 +34,7 @@ def certificate_pem() -> str:
 
 
 def nominal_power() -> int:
-    """The nominal power P certified by the Manufacturer, read from the VEN
+    """The nominal power P certified by the CA, read from the VEN
     certificate subject (OU=P=<watts>).
 
     P is certified rather than self-declared so that a compromised appliance
