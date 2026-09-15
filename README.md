@@ -12,7 +12,7 @@ Demand response (DR) works today with large industrial consumers: when the grid 
 
 **Trust.** The home is not a trusted environment and the coordinator is not trusted to respect what the user agreed to.
 
-This platform answers both with cryptography instead of surveillance. The user declares *when* each appliance may be curtailed, the appliance itself enforces that declaration, and every completed curtailment produces a signed proof that is the only basis for payment.
+This platform answers both with cryptography instead of surveillance. The user declares *when* each appliance may be curtailed, the appliance itself enforces that declaration, and no reward exists without a signed proof the platform has verified.
 
 ## Project Components
 
@@ -41,7 +41,7 @@ Everything rests on a single X.509 trust root.
 | Configuration bundle | User | Tells the appliance, authentically, who is enrolling it |
 | Owner proof | Appliance HSM | Binds the device to its owner and its certified parameters |
 | Availability calendar | User | Weekly schedule, with a monotonic version that blocks rollback |
-| Participation evidence | Appliance HSM | The auditable record a reward is computed from |
+| Participation evidence | Appliance HSM | The signed record a reward requires |
 
 The user's half of that never leaves the phone. The key is generated inside the Android Keystore and is non-exportable, so the app signs the CSR, the pairing bundle, the calendar and the mTLS handshake in place rather than holding key material it could leak.
 
@@ -67,6 +67,7 @@ The Android client is covered too. `RegistrationFlowTest` drives the real protoc
 - **Issuance-side validation is missing.** The CA verifies possession of the key but not the identity behind it, nor the operator role attribute. Both checks belong in the RA role and currently rest on the requesting side.
 - **Trust on first use at pairing.** The prototype appliance ships without the CA root and adopts the one delivered in the first configuration bundle. In production it would be provisioned at the factory.
 - **The HSM is emulated and the curtailment is simulated.** A signature proves the appliance produced the evidence, not that power flowed differently. Real metering behind the same signing boundary is the natural next step.
+- **Stored evidence is verified once, at submission.** No later path compares a participation row against the signature stored beside it, and the reward is computed from the row's own columns. A `reduction_pct` edited in the database would change a payout without invalidating anything. The availability path is the opposite: the appliance re-verifies the calendar on every poll, which is why a rolled-back row planted directly in the table is refused.
 - **Selection is a deterministic greedy heuristic**, not an optimisation. Fairness across households is not considered.
 - **Scale is untested.** One physical appliance, with fleet behaviour exercised through a synthetic population of 20 users and 40 appliances.
 
@@ -79,18 +80,7 @@ pip install -r requirements.txt
 powershell -ExecutionPolicy Bypass -File .\run_all.ps1
 ```
 
-`start_services.ps1` leaves the services listening on the LAN instead, for the Android app and a deployed appliance. Two addresses are site-specific:
-
-```bash
-# this machine's LAN address, so a phone or a Raspberry Pi can reach the services
-EXTRA_SAN_IPS="192.168.1.50" bash make_certs.sh
-
-# the same address, for the app to hand to an appliance during pairing
-echo "vpp.lan.host=192.168.1.50" >> android-app/local.properties
-
-# a full DR event against a real Raspberry Pi
-python tests/verify_pi.py http://raspberrypi.local:8082 192.168.1.50
-```
+That is the whole system verified against itself. Driving it by hand instead, with the phone, a Raspberry Pi and the synthetic fleet, is [RUNBOOK.md](RUNBOOK.md), and [TROUBLESHOOTING.md](TROUBLESHOOTING.md) covers what looks broken but is not.
 
 > **No key material of any kind is in this repository.** `make_certs.sh` builds the entire PKI locally, and `*.key`, `*.pem`, `*.p12`, `*.crt` and friends are refused by `.gitignore` as patterns rather than paths, so a key written somewhere new is still caught. Two exceptions are explicit and public: the Spanish national police DNIe root, and the development CA root the Android app needs to compile. The `changeit` PKCS#12 password is a placeholder for locally generated test material and is overridable with `P12_PASS`.
 

@@ -1,13 +1,13 @@
 import base64
 
-import jwt  # PyJWT
+import jwt
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
 from . import crypto_service
 
 SLOT_MINUTES = 30
-SLOTS_PER_DAY = 24 * 60 // SLOT_MINUTES          # 48
+SLOTS_PER_DAY = 24 * 60 // SLOT_MINUTES
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 
@@ -60,7 +60,7 @@ def verify_signed(jws_token: str, expected_owner: str) -> dict:
     owner_pub = owner_cert.public_key().public_bytes(
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
     try:
-        # ES256 = Android Keystore EC credential; RS256 = JVM/software keys.
+        # ES256 = Android Keystore EC credential, RS256 = JVM/software keys
         payload = jwt.decode(jws_token, owner_pub, algorithms=["RS256", "ES256"])
     except Exception as e:
         raise InvalidAvailability(f"calendar signature invalid: {e}")

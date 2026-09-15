@@ -1,42 +1,18 @@
-# run_all.ps1 - start every TFG service, run all verification gates, then stop.
-#
-# Usage (from the repo root):
-#   powershell -ExecutionPolicy Bypass -File .\run_all.ps1
-#
-# Starts: Manufacturer/RA (:8081), VPP normal-TLS (:8080), VPP mutual-TLS (:8443),
-# appliance pairing (:8082). Runs every gate. Stops the services on exit.
-#
-# The appliance's periodic VTN polling stays out of the way (one tick per hour):
-# the gates drive each poll cycle explicitly through /poll and /evidence, so
-# their positive/negative checks are deterministic regardless of wall clock.
-#
-# The mutual-TLS endpoint binds to LOOPBACK during the run: the deployed
-# Raspberry Pi holds the same VEN identity and polls every minute, and a tick
-# landing between a gate issuing an activation and its manual /poll would
-# consume it (observed as "polled: 0" flakes). Interactive use keeps 0.0.0.0
-# via start_services.ps1.
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
+. "$root\_services.ps1"
+
+# Hourly, so no background tick races the polls the gates drive themselves.
 $env:TFG_POLL_SECONDS = "3600"
+
+# Loopback: the deployed Pi shares this VEN identity and would steal the gates'
+# activations. start_services.ps1 keeps 0.0.0.0 for interactive use.
 $env:TFG_MTLS_HOST = "127.0.0.1"
 
-# Free the ports first. A leftover service from an interactive session
-# (start_services.ps1) would otherwise answer the port check below and the
-# gates would silently run against IT, with the WRONG environment: a live
-# 60-second polling loop and mTLS on 0.0.0.0. That is the root cause of the
-# historical "nothing submitted" / stolen-activation flakes.
-foreach ($p in 8080, 8081, 8082, 8443) {
-    Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue |
-        ForEach-Object { try { Stop-Process -Id $_.OwningProcess -Force -ErrorAction Stop } catch {} }
-}
-Start-Sleep -Milliseconds 800
+# A leftover start_services.ps1 would answer the check below, wrongly configured.
+Stop-ServicePorts
 
-# --- locate the venv python -------------------------------------------------
-$py = $null
-foreach ($cand in @("$root\..\.venv\Scripts\python.exe", "$root\.venv\Scripts\python.exe")) {
-    if (Test-Path $cand) { $py = (Resolve-Path $cand).Path; break }
-}
-if (-not $py) { $py = "python" }
+$py = Find-Python $root
 Write-Host "Python: $py`n"
 
 function Wait-Port([int]$port, [int]$timeoutSec = 25) {
@@ -50,18 +26,14 @@ function Wait-Port([int]$port, [int]$timeoutSec = 25) {
     return $false
 }
 
-$procs = @()
 try {
     Write-Host "Starting services..." -ForegroundColor Cyan
-    $procs += Start-Process $py -PassThru -WindowStyle Hidden -WorkingDirectory "$root\manufacturer" -ArgumentList @("-m","uvicorn","app.main:app","--host","0.0.0.0","--port","8081","--ssl-keyfile","../certs/server.key","--ssl-certfile","../certs/server.crt")
-    $procs += Start-Process $py -PassThru -WindowStyle Hidden -WorkingDirectory "$root\vpp-server" -ArgumentList @("-m","uvicorn","app.main:app","--host","0.0.0.0","--port","8080","--ssl-keyfile","../certs/vpp.key","--ssl-certfile","../certs/vpp.crt")
-    $procs += Start-Process $py -PassThru -WindowStyle Hidden -WorkingDirectory "$root\vpp-server" -ArgumentList @("mtls_server.py")
-    $procs += Start-Process $py -PassThru -WindowStyle Hidden -WorkingDirectory "$root\appliance" -ArgumentList @("-m","uvicorn","app.main:app","--host","0.0.0.0","--port","8082")
+    $procs = Start-Services $py $root
 
-    foreach ($pt in 8080,8081,8082,8443) {
+    foreach ($pt in $Ports) {
         if (-not (Wait-Port $pt)) { throw "service on port $pt did not start (port already in use?)" }
     }
-    Write-Host "All services up (8080, 8081, 8082, 8443).`n" -ForegroundColor Green
+    Write-Host "All services up ($($Ports -join ', ')).`n" -ForegroundColor Green
 
     $gates = "verify_setup","verify_jws","verify_ca","verify_enroll","verify_mtls",
              "verify_pair","verify_owner_proof","verify_openadr","verify_availability",
@@ -69,8 +41,7 @@ try {
              "verify_remuneration","verify_backoffice"
     $fail = 0
     foreach ($g in $gates) {
-        # No 2>&1 here: in PowerShell 5.1 redirecting a native command's stderr
-        # wraps each line in a NativeCommandError, which hides the real failure.
+        # No 2>&1: PowerShell 5.1 wraps native stderr in a NativeCommandError.
         $out = & $py "$root\tests\$g.py"
         $code = $LASTEXITCODE
         $last = ($out | Select-Object -Last 1)

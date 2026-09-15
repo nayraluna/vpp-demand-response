@@ -17,7 +17,7 @@ from . import config as device_config  # noqa: E402
 from .pairing_service import _issued_by  # noqa: E402
 
 SLOT_MINUTES = 30
-SLOTS_PER_DAY = 48
+SLOTS_PER_DAY = 24 * 60 // SLOT_MINUTES
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 DEFAULT_POLL_SECONDS = 60
