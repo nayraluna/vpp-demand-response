@@ -35,7 +35,9 @@ import java.time.ZonedDateTime
 
 class RegistrationFlowTest {
 
-    private val repoDir = File(System.getProperty("tfg.repo") ?: "C:/TFG-VPP-Server")
+    // Gradle runs unit tests with the module directory as the working
+    // directory, so the repository root is two levels up. -Dtfg.repo overrides it.
+    private val repoDir = File(System.getProperty("tfg.repo") ?: "../..")
     private val certsDir = File(repoDir, "certs")
     private val caFile = File(certsDir, "CA.crt")
     private val python = File(repoDir, ".venv/Scripts/python.exe")

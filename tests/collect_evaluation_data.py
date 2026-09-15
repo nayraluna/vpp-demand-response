@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-ROOT = Path(r"c:\TFG-VPP-Server")
+ROOT = Path(__file__).resolve().parent.parent
 CERTS = ROOT / "certs"
 CA_FILE = str(CERTS / "CA.crt")
 DB_FILE = ROOT / "vpp-server" / "vpp.db"
