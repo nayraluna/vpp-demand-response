@@ -4,13 +4,14 @@ from pathlib import Path
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 
+from . import registry
+
 CERTS_DIR = Path(__file__).resolve().parent.parent.parent / "certs"
 CA_CERT_FILE = CERTS_DIR / "CA.crt"
 CA_KEY_FILE = CERTS_DIR / "CA.key"
 
 _ca_cert = None
 _ca_key = None
-_issued: dict[str, str] = {}  # public-key SHA-256 -> serial, to reject re-enrollment (in-memory: resets on restart, a prototype simplification)
 
 
 class InvalidCSR(Exception):
@@ -25,6 +26,7 @@ def initialize() -> None:
     global _ca_cert, _ca_key
     _ca_cert = x509.load_pem_x509_certificate(CA_CERT_FILE.read_bytes())
     _ca_key = serialization.load_pem_private_key(CA_KEY_FILE.read_bytes(), password=None)
+    registry.initialize()
 
 
 def ca_certificate_pem() -> str:
@@ -55,8 +57,9 @@ def issue_from_csr(csr_pem: str, days: int = 365) -> dict:
 
     public_key = csr.public_key()
     key_id = _public_key_id(public_key)
-    if key_id in _issued:
-        raise AlreadyEnrolled(f"public key already enrolled (serial {_issued[key_id]})")
+    already = registry.serial_for_key(key_id)
+    if already:
+        raise AlreadyEnrolled(f"public key already enrolled (serial {already})")
 
     serial = x509.random_serial_number()
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -95,7 +98,7 @@ def issue_from_csr(csr_pem: str, days: int = 365) -> dict:
     )
 
     serial_hex = format(serial, "x")
-    _issued[key_id] = serial_hex
+    registry.record(serial_hex, key_id, cert.subject.rfc4514_string(), now, not_after)
     return {
         "certificate": cert.public_bytes(serialization.Encoding.PEM).decode(),
         "subject": cert.subject.rfc4514_string(),
