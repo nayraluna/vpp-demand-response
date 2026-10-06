@@ -292,12 +292,12 @@ Regenerating it invalidates every existing certificate. Full order:
 2. `cd certs && bash make_certs.sh` in Git Bash. This rebuilds the CA, `vpp.*`,
    `server.*` and `VEN.*`.
 3. Clear the old state: delete `vpp-server/vpp.db`, and reset the PC appliance
-   by deleting `appliance/config.json`, `appliance/trust_ra.pem` and
+   by deleting `appliance/config.json` and
    `appliance/trust_vpp.pem`.
 4. App: copy `certs/CA.crt` over `android-app/app/src/main/res/raw/ca.crt`,
    rebuild, reinstall the APK, log out in the app and register again.
 5. Operator: `python backoffice/dr_operator.py init --force`.
-6. Pi: copy `certs/VEN.p12`, `certs/VEN.crt` and `certs/VEN.key` to the Pi's
+6. Pi: copy `certs/VEN.p12`, `certs/VEN.crt`, `certs/VEN.key` and `certs/CA.crt` to the Pi's
    `~/certs/`, restart `appliance.service`, factory reset the Pi with
    `POST http://<pi-address>:8082/factory-reset`, and re-pair it.
 7. Verify in order: `run_all.ps1`, then the JVM flow test, then `verify_pi.py`.

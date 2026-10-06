@@ -2,6 +2,7 @@ import base64
 from pathlib import Path
 
 import jwt  # PyJWT
+from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa, ec
 from cryptography.hazmat.primitives.serialization import pkcs12
@@ -10,6 +11,10 @@ from cryptography.x509.oid import NameOID
 CERTS_DIR = Path(__file__).resolve().parent.parent / "certs"
 P12_FILE = CERTS_DIR / "VEN.p12"
 P12_PASSWORD = b"changeit"
+# The platform root, installed next to the signing key at the factory. It is
+# the only thing the appliance trusts before pairing, so a bundle has to prove
+# itself against this anchor rather than against one it brings along.
+CA_FILE = CERTS_DIR / "CA.crt"
 
 _private_key = None
 _certificate = None
@@ -27,6 +32,15 @@ def initialize() -> None:
 
 def subject() -> str:
     return _certificate.subject.rfc4514_string()
+
+
+def trust_anchor():
+    """The factory-installed CA root. Missing means the device was never
+    provisioned, which is a hard error rather than something to work around."""
+    try:
+        return x509.load_pem_x509_certificate(CA_FILE.read_bytes())
+    except FileNotFoundError:
+        raise RuntimeError(f"appliance not provisioned: no factory root at {CA_FILE}")
 
 
 def certificate_pem() -> str:

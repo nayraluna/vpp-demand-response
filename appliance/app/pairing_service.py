@@ -63,25 +63,28 @@ def pair(jws_token: str) -> dict:
     except Exception as e:
         raise InvalidBundle(f"owner signature invalid: {e}")
 
-    # 3. The owner certificate must be issued by the RA delivered in the bundle.
+    # 3. The owner and the VPP must both be certified by the root this device
+    #    left the factory with. The bundle may still carry a `cert_ra` field,
+    #    older apps send it, but it is ignored: a trust anchor received over the
+    #    channel it is meant to protect would let anyone on the LAN enrol an
+    #    unpaired appliance into a VPP of their own, with a root of their own.
+    cert_ra = hsm.trust_anchor()
     try:
-        cert_ra = x509.load_pem_x509_certificate(payload["cert_ra"].encode())
         cert_vpp = x509.load_pem_x509_certificate(payload["cert_vpp"].encode())
     except Exception as e:
-        raise InvalidBundle(f"missing/invalid certificates in bundle: {e}")
+        raise InvalidBundle(f"missing/invalid VPP certificate in bundle: {e}")
     if not _issued_by(owner, cert_ra):
-        raise InvalidBundle("owner certificate not issued by the RA in the bundle")
+        raise InvalidBundle("owner certificate not issued by the platform CA")
     if not _issued_by(cert_vpp, cert_ra):
-        raise InvalidBundle("VPP certificate not issued by the RA in the bundle")
+        raise InvalidBundle("VPP certificate not issued by the platform CA")
 
-    # 4. Store the configuration and leave pairing mode (state 0 -> 1).
-    # The RA and VPP certificates are written to disk: the appliance needs the
-    # RA certificate as its trust anchor when it later calls the VPP itself.
+    # 4. Store the configuration and leave pairing mode (state 0 -> 1). The
+    # trust anchor for every later call to the VPP is the factory root itself.
+    # The VPP certificate is kept because it was verified against that root.
     owner_subject = owner.subject.rfc4514_string()
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     here = Path(__file__).resolve().parent.parent
-    ra_file, vpp_file = here / "trust_ra.pem", here / "trust_vpp.pem"
-    ra_file.write_text(payload["cert_ra"])
+    vpp_file = here / "trust_vpp.pem"
     vpp_file.write_text(payload["cert_vpp"])
     cfg.update({
         "state": 1,
@@ -90,7 +93,7 @@ def pair(jws_token: str) -> dict:
         "owner": owner_subject,
         "owner_serial": format(owner.serial_number, "x"),
         "paired_at": now,
-        "ra_cert_file": str(ra_file),
+        "ra_cert_file": str(hsm.CA_FILE),
         "vpp_cert_file": str(vpp_file),
     })
     device_config.save(cfg)

@@ -65,6 +65,30 @@ def make_jws(key, cert_pem: str, payload: dict) -> str:
                       headers={"x5c": [x5c], "typ": "application/pairing+json"})
 
 
+def fake_platform():
+    """A whole platform of someone else's: its own root, a user and a VPP
+    certified under it. Internally consistent, and worth nothing to a device
+    that left the factory with the real root."""
+    def make(subject, issuer_name, issuer_key, key, ca):
+        now = datetime.datetime.now(datetime.timezone.utc)
+        b = (x509.CertificateBuilder().subject_name(subject).issuer_name(issuer_name)
+             .public_key(key.public_key()).serial_number(x509.random_serial_number())
+             .not_valid_before(now).not_valid_after(now + datetime.timedelta(days=1))
+             .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True))
+        return b.sign(issuer_key, hashes.SHA256())
+    root_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    root_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Fake Platform Root")])
+    root = make(root_name, root_name, root_key, root_key, True)
+    user_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    user = make(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "fake-user")]),
+                root_name, root_key, user_key, False)
+    vpp_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    vpp = make(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "fake-vpp")]),
+               root_name, root_key, vpp_key, False)
+    pem = lambda c: c.public_bytes(serialization.Encoding.PEM).decode()
+    return pem(root), user_key, pem(user), pem(vpp)
+
+
 def bundle() -> dict:
     """What the app sends: how to reach the VPP. NOT the appliance parameters -
     those are device properties the appliance itself reports back."""
@@ -96,6 +120,19 @@ def main():
     r = requests.post(f"{APP}/pair", json={"jws": make_jws(skey, scert, bundle())})
     ok("owner not certified by the RA rejected (400)") if r.status_code == 400 \
         else die(f"expected 400, got {r.status_code}")
+
+    # The LAN attack: a bundle that is consistent under a root the attacker
+    # made, carrying that root as cert_ra. With the anchor delivered inside
+    # the bundle this used to pass every check. The device now trusts only the
+    # root it was provisioned with, so the whole fake platform is refused.
+    froot, fkey, fuser, fvpp = fake_platform()
+    fake = {**bundle(), "cert_ra": froot, "cert_vpp": fvpp}
+    r = requests.post(f"{APP}/pair", json={"jws": make_jws(fkey, fuser, fake)})
+    ok(f"a bundle vouched for only by its own root is refused (400): {r.json().get('detail', '')[:52]}") \
+        if r.status_code == 400 else die(f"fake platform accepted: {r.status_code} {r.text}")
+    r = requests.get(f"{APP}/ping")
+    ok("appliance still unpaired after the attempt") if r.json()["state"] == 0 \
+        else die("the fake platform paired the appliance")
 
     print("G2: a correct bundle pairs the appliance")
     r = requests.post(f"{APP}/pair", json={"jws": token})
