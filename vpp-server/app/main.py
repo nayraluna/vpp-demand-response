@@ -5,7 +5,7 @@ from cryptography import x509
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from . import crypto_service, db
+from . import crypto_service, db, revocation
 
 
 @asynccontextmanager
@@ -43,6 +43,11 @@ def enroll(req: EnrollRequest) -> dict:
         raise HTTPException(status_code=400, detail="invalid certificate PEM")
     if not crypto_service.issued_by_ra(cert):
         raise HTTPException(status_code=403, detail="certificate not issued by the RA")
+    try:
+        if revocation.is_revoked(cert):
+            raise HTTPException(status_code=403, detail="certificate revoked")
+    except revocation.Unavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
     subject = cert.subject.rfc4514_string()
     already = db.get_user(subject) is not None

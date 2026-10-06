@@ -11,6 +11,7 @@ FACTORY_DEFAULTS = {
     "vpp_url": None,     # filled at pairing
     "vpp_mtls_url": None,
     "owner": None,       # subject of the user who paired the appliance
+    "owner_serial": None,   # serial of that user's certificate, checked against the CRL
     "paired_at": None,
     "ra_cert_file": None,   # trust anchor used when calling the VPP
     "vpp_cert_file": None,
@@ -18,6 +19,9 @@ FACTORY_DEFAULTS = {
     "registration": None,       # VEN registration with the VTN (ids + poll freq)
     "availability": None,       # owner-signed weekly calendar, adopted via polling
     "availability_version": 0,  # monotonic version of the adopted calendar
+    "crl_number": 0,            # monotonic number of the adopted revocation list
+    "crl_next_update": None,    # when that list stops being trusted
+    "crl_revoked": [],          # serials it lists
     "processed": [],            # activation ids already handled (replay protection)
     "seen_nonces": [],          # nonces already seen  (replay protection)
     "last_activation": None,    # what the appliance is currently doing

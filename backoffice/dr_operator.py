@@ -1,8 +1,10 @@
 import argparse
+import base64
 import json
 import sys
 from pathlib import Path
 
+import jwt
 import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -49,6 +51,42 @@ def _hour_to_slot(text: str) -> int:
     return av.slot_index(int(hour), int(minute or 0))
 
 
+def _sign_as_operator(payload: dict, typ: str) -> str:
+    """A JWS carrying the operator certificate in x5c, so a listener without
+    client certificates (the CA) can still tell who is asking."""
+    crt, key = init_credential()
+    cert = x509.load_pem_x509_certificate(Path(crt).read_bytes())
+    x5c = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode()
+    return jwt.encode(payload, Path(key).read_bytes(), algorithm="RS256",
+                      headers={"x5c": [x5c], "typ": typ})
+
+
+def revoke(serial: str, reason: str) -> None:
+    token = _sign_as_operator({"serial": serial, "reason": reason},
+                              "application/revocation-request+json")
+    r = requests.post(f"{CA}/ra/revoke", json={"request": token}, verify=CA_FILE)
+    body = r.json()
+    if r.status_code != 200:
+        raise SystemExit(f"/ra/revoke -> HTTP {r.status_code}: {body.get('detail', body)}")
+    print(f"REVOKED {body['revoked']} ({body['reason']}), CRL number is now {body['crl_number']}")
+
+
+def show_crl() -> None:
+    r = requests.get(f"{CA}/ra/crl", verify=CA_FILE)
+    r.raise_for_status()
+    anchor = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes()).public_key()
+    crl = jwt.decode(r.json()["crl"], anchor.public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo),
+        algorithms=["RS256"])
+    print(f"CRL #{crl['crl_number']} from {crl['issuer']}")
+    print(f"  this_update {crl['this_update']}")
+    print(f"  next_update {crl['next_update']}")
+    if not crl["revoked"]:
+        print("  (no revoked certificates)")
+    for e in crl["revoked"]:
+        print(f"  {e['serial']}  {e['revoked_at'][:19]}  {e['reason']}")
+
+
 def _request(path: str, body: dict) -> dict:
     client = init_credential()
     r = requests.post(f"{MTLS}{path}", json=body, cert=client, verify=CA_FILE)
@@ -93,7 +131,17 @@ def main() -> None:
             p.add_argument("--action", default="reduce",
                            choices=("reduce", "shutdown"))
 
+    rv = sub.add_parser("revoke", help="revoke a certificate issued by the CA")
+    rv.add_argument("--serial", required=True, help="hex serial of the certificate")
+    rv.add_argument("--reason", default="unspecified",
+                    help="keyCompromise, cessationOfOperation, superseded...")
+    sub.add_parser("crl", help="fetch and print the current revocation list")
+
     args = parser.parse_args()
+    if args.command == "revoke":
+        return revoke(args.serial, args.reason)
+    if args.command == "crl":
+        return show_crl()
     if args.command == "init":
         crt, _ = init_credential(force=args.force)
         subject = x509.load_pem_x509_certificate(

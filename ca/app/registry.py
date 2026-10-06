@@ -24,6 +24,12 @@ def initialize() -> None:
                    reason      TEXT)"""
         )
         c.execute("CREATE INDEX IF NOT EXISTS issued_key_id ON issued(key_id)")
+        # Small key/value store. Today it holds one thing, the CRL number.
+        c.execute(
+            """CREATE TABLE IF NOT EXISTS meta(
+                   key   TEXT PRIMARY KEY,
+                   value TEXT NOT NULL)"""
+        )
 
 
 def record(serial: str, key_id: str, subject: str,
@@ -45,6 +51,18 @@ def serial_for_key(key_id: str) -> str | None:
     return row[0] if row else None
 
 
+def lookup(serial: str) -> dict | None:
+    with _conn() as c:
+        row = c.execute(
+            "SELECT serial, subject, not_after, revoked_at, reason FROM issued"
+            " WHERE serial=?", (serial,)
+        ).fetchone()
+    if not row:
+        return None
+    return {"serial": row[0], "subject": row[1], "not_after": row[2],
+            "revoked_at": row[3], "reason": row[4]}
+
+
 def revoke(serial: str, reason: str,
            when: datetime.datetime | None = None) -> bool:
     """Mark a certificate revoked.
@@ -56,6 +74,8 @@ def revoke(serial: str, reason: str,
             " WHERE serial=? AND revoked_at IS NULL",
             (when.isoformat(), reason, serial),
         ).rowcount
+        if changed == 1:
+            _bump_crl_number(c)
     return changed == 1
 
 
@@ -79,3 +99,23 @@ def revoked(now: datetime.datetime | None = None) -> list[dict]:
             (now.isoformat(),),
         ).fetchall()
     return [{"serial": r[0], "revoked_at": r[1], "reason": r[2]} for r in rows]
+
+
+def crl_number() -> int:
+    """Monotonic counter, bumped on every revocation. The same role the version
+    plays in the availability calendar: a relying party refuses a list older
+    than the one it already holds."""
+    with _conn() as c:
+        row = c.execute("SELECT value FROM meta WHERE key='crl_number'").fetchone()
+    return int(row[0]) if row else 0
+
+
+def _bump_crl_number(c: sqlite3.Connection) -> int:
+    # Takes the caller's connection so the bump commits together with the
+    # revocation that caused it. Done separately, one could land without the
+    # other.
+    row = c.execute("SELECT value FROM meta WHERE key='crl_number'").fetchone()
+    n = (int(row[0]) if row else 0) + 1
+    c.execute("INSERT INTO meta(key, value) VALUES('crl_number', ?)"
+              " ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(n),))
+    return n

@@ -31,6 +31,46 @@ class NotConfigured(Exception):
     """The appliance is still in pairing mode."""
 
 
+def _adopt_crl(jws_token: str, cfg: dict) -> dict:
+    """Verify and adopt the CA's revocation list relayed by the VTN.
+
+    Same shape as the calendar: the VPP only relays it, the appliance trusts
+    the CA's signature, checked against the root recorded at pairing, and
+    accepts only a list numbered at or above the one it holds. A VPP that
+    serves an older list to hide a revocation is refused by the device itself.
+    The caller persists cfg.
+    """
+    try:
+        ra_cert = x509.load_pem_x509_certificate(Path(cfg["ra_cert_file"]).read_bytes())
+    except Exception as e:
+        return {"status": "refused", "reason": f"trust anchor from pairing unavailable: {e}"}
+    anchor = ra_cert.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+    try:
+        payload = jwt.decode(jws_token, anchor, algorithms=["RS256"])
+    except Exception as e:
+        return {"status": "refused", "reason": f"revocation list not signed by the CA: {e}"}
+
+    number, stored = payload.get("crl_number"), cfg.get("crl_number") or 0
+    if not isinstance(number, int) or isinstance(number, bool) or number < 0:
+        return {"status": "refused", "reason": "revocation list carries no valid number"}
+    if number < stored:
+        return {"status": "refused",
+                "reason": f"stale revocation list {number} (ours is {stored}): "
+                          "an older list cannot replace a newer one"}
+    revoked = payload.get("revoked")
+    if not isinstance(revoked, list) or not payload.get("next_update"):
+        return {"status": "refused", "reason": "revocation list is malformed"}
+
+    # Equal numbers still refresh next_update: the CA re-signs the same list
+    # with a new validity window on every publication.
+    cfg["crl_number"] = number
+    cfg["crl_next_update"] = payload["next_update"]
+    cfg["crl_revoked"] = [e.get("serial") for e in revoked]
+    return {"status": "current" if number == stored else "stored",
+            "crl_number": number, "revoked": len(cfg["crl_revoked"])}
+
+
 def _adopt_calendar(jws_token: str, cfg: dict) -> dict:
     """Verify and adopt the owner-signed calendar relayed by the VTN.
 
@@ -68,10 +108,22 @@ def _adopt_calendar(jws_token: str, cfg: dict) -> dict:
         return {"status": "refused",
                 "reason": "calendar signer not certified by the CA"}
 
+    # A signer the CA has since withdrawn is refused even though its signature
+    # still verifies: the list adopted earlier in this same poll decides.
+    if format(owner.serial_number, "x") in (cfg.get("crl_revoked") or []):
+        return {"status": "refused",
+                "reason": "calendar signer certificate is revoked"}
+
     # Only the owner recorded at pairing may set this appliance's availability.
     if owner.subject.rfc4514_string() != cfg["owner"]:
         return {"status": "refused",
                 "reason": "calendar not signed by the owner of this appliance"}
+
+    # This signer is the owner, chains to the CA and is not revoked, so it is
+    # the owner's CURRENT certificate. Remember its serial: after a renewal the
+    # old one lands in the CRL as superseded, and the owner stays recognised
+    # through the calendar they sign with the new key.
+    cfg["owner_serial"] = format(owner.serial_number, "x")
 
     version = payload.get("version")
     stored = cfg.get("availability_version") or 0
@@ -113,6 +165,18 @@ def _check(activation: dict, cfg: dict, now: datetime.datetime) -> str | None:
         return "activation already processed (replay)"
     if activation["nonce"] in cfg["seen_nonces"]:
         return "nonce already seen (replay)"
+
+    # Fail closed on revocation. Without a list that is still inside its
+    # validity window the appliance cannot know whether the parties it relies
+    # on are still trusted, so it does not act. The owner's calendar is still
+    # honoured, so refusing costs the user nothing.
+    next_update = cfg.get("crl_next_update")
+    if not next_update:
+        return "no revocation list adopted yet"
+    if now > datetime.datetime.fromisoformat(next_update):
+        return f"revocation list expired at {next_update}, refusing to act"
+    if cfg.get("owner_serial") and cfg["owner_serial"] in (cfg.get("crl_revoked") or []):
+        return "owner certificate is revoked"
 
     day, start, end = activation["day"], activation["slot_start"], activation["slot_end"]
     if day not in DAYS or not (0 <= start < end <= SLOTS_PER_DAY):
@@ -208,6 +272,13 @@ def _poll_and_process() -> dict:
         cfg["vpp_mtls_url"], cfg["ra_cert_file"], *_ven_identity(),
     )
 
+    # The revocation list comes first: the calendar adopted right after is
+    # judged against it, so a calendar from a just-revoked owner is refused in
+    # the same pull that announced the revocation.
+    crl = None
+    if body.get("crl"):
+        crl = _adopt_crl(body["crl"], cfg)
+
     # The owner-signed calendar rides in the poll response; adopt it BEFORE
     # checking activations, so the same pull that delivers a new calendar has
     # its activations judged against the owner's latest declaration.
@@ -253,7 +324,7 @@ def _poll_and_process() -> dict:
         executed.append(record)
 
     device_config.save(cfg)
-    return {"polled": len(activations), "calendar": calendar,
+    return {"polled": len(activations), "crl": crl, "calendar": calendar,
             "executed": executed, "refused": refused}
 
 
@@ -318,8 +389,12 @@ def _submit_evidence() -> dict:
 def status() -> dict:
     cfg = device_config.load()
     return {"state": cfg["state"], "owner": cfg["owner"],
+            "owner_serial": cfg.get("owner_serial"),
             "registration": cfg.get("registration"),
             "availability_declared": cfg.get("availability") is not None,
             "availability_version": cfg.get("availability_version") or 0,
+            "crl_number": cfg.get("crl_number") or 0,
+            "crl_next_update": cfg.get("crl_next_update"),
+            "crl_revoked": len(cfg.get("crl_revoked") or []),
             "last_activation": cfg.get("last_activation"),
             "executed_count": len(cfg.get("history", []))}

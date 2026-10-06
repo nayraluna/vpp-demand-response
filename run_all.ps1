@@ -9,6 +9,10 @@ $env:TFG_POLL_SECONDS = "3600"
 # activations. start_services.ps1 keeps 0.0.0.0 for interactive use.
 $env:TFG_MTLS_HOST = "127.0.0.1"
 
+# No CRL cache: a gate that revokes a certificate expects the next request to
+# be refused, not the one five minutes later.
+$env:TFG_CRL_MAX_AGE = "0"
+
 # A leftover start_services.ps1 would answer the check below, wrongly configured.
 Stop-ServicePorts
 
@@ -38,7 +42,8 @@ try {
     $gates = "verify_setup","verify_jws","verify_ca","verify_enroll","verify_mtls",
              "verify_pair","verify_owner_proof","verify_openadr","verify_availability",
              "verify_selection","verify_activation","verify_evidence",
-             "verify_remuneration","verify_backoffice"
+             "verify_remuneration","verify_backoffice","verify_revocation",
+             "verify_renewal"
     $fail = 0
     foreach ($g in $gates) {
         # No 2>&1: PowerShell 5.1 wraps native stderr in a NativeCommandError.

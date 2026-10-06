@@ -85,6 +85,15 @@ def initialize() -> None:
                 c.execute(f"ALTER TABLE availability ADD COLUMN {column} {decl}")
             except sqlite3.OperationalError:
                 pass  # column already present
+        # The CA's revocation list as last fetched, relayed verbatim to the
+        # appliance in the poll response exactly like the calendar. One row.
+        c.execute(
+            """CREATE TABLE IF NOT EXISTS crl(
+                   id         INTEGER PRIMARY KEY CHECK (id = 1),
+                   jws        TEXT NOT NULL,
+                   crl_number INTEGER NOT NULL,
+                   fetched_at TEXT NOT NULL)"""
+        )
 
 
 def get_user(subject: str) -> dict | None:
@@ -311,3 +320,23 @@ def add_registration(ven_subject: str, ven_id: str, registration_id: str,
                    ven_name, profile, registered_at) VALUES(?,?,?,?,?,?)""",
             (ven_subject, ven_id, registration_id, ven_name, profile, registered_at),
         )
+
+
+def store_crl(jws: str, crl_number: int, fetched_at: str) -> None:
+    """Keep the relay copy. It never moves to a lower number, so a copy the VPP
+    holds cannot be replaced by an older list however it got there."""
+    with _conn() as c:
+        c.execute(
+            """INSERT INTO crl(id, jws, crl_number, fetched_at) VALUES(1, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                   jws=excluded.jws, crl_number=excluded.crl_number,
+                   fetched_at=excluded.fetched_at
+               WHERE excluded.crl_number >= crl.crl_number""",
+            (jws, crl_number, fetched_at),
+        )
+
+
+def get_crl() -> str | None:
+    with _conn() as c:
+        row = c.execute("SELECT jws FROM crl WHERE id=1").fetchone()
+    return row[0] if row else None

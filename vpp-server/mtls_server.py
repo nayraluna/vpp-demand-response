@@ -12,7 +12,7 @@ from cryptography.x509.oid import NameOID
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from app import (availability, crypto_service, db,  # noqa: E402
-                 evidence, owner_proof, remuneration, scheduling)
+                 evidence, owner_proof, remuneration, revocation, scheduling)
 
 CERTS = Path(__file__).resolve().parent.parent / "certs"
 # All interfaces by default: emulator (10.0.2.2) AND physical devices on the
@@ -33,11 +33,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _refused_as_revoked(self, cert) -> bool:
+        # The TLS layer checks that the certificate chains to the CA. It cannot
+        # know whether the CA has since withdrawn it, so that is checked here,
+        # once per request, before any handler sees the identity.
+        try:
+            if revocation.is_revoked(cert):
+                self._json(403, {"error": "certificate revoked",
+                                 "subject": cert.subject.rfc4514_string()})
+                return True
+        except revocation.Unavailable as e:
+            self._json(503, {"error": str(e)})
+            return True
+        return False
+
     def do_GET(self):
         # The client cert was already validated against the RA by the TLS layer
         # (CERT_REQUIRED + CA.crt). Read it and identify the enrolled user.
         der = self.connection.getpeercert(binary_form=True)
         cert = x509.load_der_x509_certificate(der)
+        if self._refused_as_revoked(cert):
+            return
         subject = cert.subject.rfc4514_string()
 
         # The appliance polls with its VEN certificate, not a user certificate:
@@ -79,6 +95,8 @@ class Handler(BaseHTTPRequestHandler):
         # owner proof, the appliance registers itself as a VEN).
         der = self.connection.getpeercert(binary_form=True)
         cert = x509.load_der_x509_certificate(der)
+        if self._refused_as_revoked(cert):
+            return
         subject = cert.subject.rfc4514_string()
 
         length = int(self.headers.get("Content-Length", 0))
@@ -229,7 +247,9 @@ class Handler(BaseHTTPRequestHandler):
         # verifies its signature and version itself (the VPP only relays it).
         declared = db.get_availability(ven_subject)
         return self._json(200, {"ven": ven_subject, "activations": pending,
-                                "calendar": declared.get("jws") if declared else None})
+                                "calendar": declared.get("jws") if declared else None,
+                                # The CA's revocation list, relayed the same way.
+                                "crl": db.get_crl()})
 
     def _dr_activate(self, cert, subject: str, body: dict):
         """Operational step 3: issue activations to the selected appliances.

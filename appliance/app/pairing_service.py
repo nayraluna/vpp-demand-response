@@ -88,6 +88,7 @@ def pair(jws_token: str) -> dict:
         "vpp_url": payload.get("vpp_url"),
         "vpp_mtls_url": payload.get("vpp_mtls_url"),
         "owner": owner_subject,
+        "owner_serial": format(owner.serial_number, "x"),
         "paired_at": now,
         "ra_cert_file": str(ra_file),
         "vpp_cert_file": str(vpp_file),
