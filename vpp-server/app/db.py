@@ -342,3 +342,8 @@ def get_crl() -> str | None:
     with _conn() as c:
         row = c.execute("SELECT jws FROM crl WHERE id=1").fetchone()
     return row[0] if row else None
+
+
+def clear_crl() -> None:
+    with _conn() as c:
+        c.execute("DELETE FROM crl")

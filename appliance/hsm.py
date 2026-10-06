@@ -5,12 +5,14 @@ import jwt  # PyJWT
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa, ec
-from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.x509.oid import NameOID
 
+# The emulated HSM is a directory. The real one would hold the key inside the
+# module and expose only signing; this one holds the key as a file written by
+# provision.py, the factory step, and never read by anyone else.
 CERTS_DIR = Path(__file__).resolve().parent.parent / "certs"
-P12_FILE = CERTS_DIR / "VEN.p12"
-P12_PASSWORD = b"changeit"
+KEY_FILE = CERTS_DIR / "VEN.key"
+CERT_FILE = CERTS_DIR / "VEN.crt"
 # The platform root, installed next to the signing key at the factory. It is
 # the only thing the appliance trusts before pairing, so a bundle has to prove
 # itself against this anchor rather than against one it brings along.
@@ -22,12 +24,11 @@ _certificate = None
 
 def initialize() -> None:
     global _private_key, _certificate
-    with open(P12_FILE, "rb") as f:
-        _private_key, _certificate, _chain = pkcs12.load_key_and_certificates(
-            f.read(), P12_PASSWORD
-        )
-    if _private_key is None or _certificate is None:
-        raise RuntimeError(f"Could not load VEN identity from {P12_FILE}")
+    try:
+        _private_key = serialization.load_pem_private_key(KEY_FILE.read_bytes(), password=None)
+        _certificate = x509.load_pem_x509_certificate(CERT_FILE.read_bytes())
+    except FileNotFoundError as e:
+        raise RuntimeError(f"appliance not provisioned: {e.filename} missing, run provision.py")
 
 
 def subject() -> str:

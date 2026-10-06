@@ -42,7 +42,7 @@ android {
         //     vpp.lan.host=192.168.1.50
         //
         // and add the same address to the certificate SAN when generating the
-        // PKI:  EXTRA_SAN_IPS="192.168.1.50" bash make_certs.sh
+        // PKI:  EXTRA_SAN_IPS="192.168.1.50" python provision_all.py
         //
         // Left empty, the app falls back to the host it uses itself, which is
         // correct for emulator-only and USB-tethered runs.

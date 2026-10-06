@@ -92,7 +92,7 @@ is **not** implemented, a documented gap.
 ## Notes
 
 - **Trust anchor:** `res/raw/ca.crt` is a **copy** of `certs/CA.crt`. If
-  `make_certs.sh` ever regenerates the CA, copy it again.
+  `provision_all.py` ever regenerates the CA, copy it again.
 - The app trusts **only** the platform CA (custom `TrustManager`), never the
   public CA store.
 - `Theme.TfgVpp` stays on MaterialComponents (not pure Compose) because the

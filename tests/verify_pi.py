@@ -26,8 +26,8 @@ CA_FILE = str(CERTS / "CA.crt")
 #   python tests/verify_pi.py http://<pi-address>:8082 <this-pc-lan-address>
 #   TFG_PI_URL=http://raspberrypi.local:8082 TFG_LAN_HOST=192.168.1.50 python tests/verify_pi.py
 #
-# <this-pc-lan-address> must be in the VPP certificate SAN; see EXTRA_SAN_IPS
-# in certs/make_certs.sh.
+# <this-pc-lan-address> must be in the VPP certificate SAN, see EXTRA_SAN_IPS
+# in provision_all.py.
 PI = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("TFG_PI_URL", "http://raspberrypi.local:8082")
 LAN = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("TFG_LAN_HOST", "")
 

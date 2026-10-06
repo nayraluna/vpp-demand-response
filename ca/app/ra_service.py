@@ -2,6 +2,8 @@ import base64
 import datetime
 from pathlib import Path
 
+import ipaddress
+
 import jwt
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -61,8 +63,42 @@ def _public_key_id(public_key) -> str:
     return digest.finalize().hex()
 
 
-def issue_from_csr(csr_pem: str, days: int = 365) -> dict:
+# What each kind of certificate is allowed to do. The requester never chooses
+# this: the profile is picked by the CA from the channel the request came in
+# on (the network endpoint issues clients, the offline tool issues the rest).
+PROFILES = {
+    # Users, operators and appliances: they sign artefacts and authenticate as
+    # TLS clients. The default of the network endpoint.
+    "client": {"key_encipherment": False,
+               "eku": [x509.ExtendedKeyUsageOID.CLIENT_AUTH]},
+    # The CA's own TLS endpoint: a server and nothing else.
+    "tls-server": {"key_encipherment": True,
+                   "eku": [x509.ExtendedKeyUsageOID.SERVER_AUTH]},
+    # The VPP: one certificate per entity, as in the reference protocol. It
+    # serves TLS on two listeners and signs DR events, so it is both.
+    "tls-server+signing": {"key_encipherment": True,
+                           "eku": [x509.ExtendedKeyUsageOID.SERVER_AUTH]},
+}
+
+
+def _san(names: list[str]) -> x509.SubjectAlternativeName:
+    entries = []
+    for n in names:
+        try:
+            entries.append(x509.IPAddress(ipaddress.ip_address(n)))
+        except ValueError:
+            entries.append(x509.DNSName(n))
+    return x509.SubjectAlternativeName(entries)
+
+
+def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
+                   san: list[str] | None = None) -> dict:
     """Verify a CSR and issue a CA-signed leaf certificate for a platform identity."""
+    if profile not in PROFILES:
+        raise InvalidCSR(f"unknown certificate profile {profile!r}")
+    if san and not profile.startswith("tls-server"):
+        raise InvalidCSR("only a TLS server certificate carries subjectAltName")
+    rules = PROFILES[profile]
     try:
         csr = x509.load_pem_x509_csr(csr_pem.encode())
     except Exception as e:
@@ -83,9 +119,9 @@ def issue_from_csr(csr_pem: str, days: int = 365) -> dict:
     now = datetime.datetime.now(datetime.timezone.utc)
     not_after = now + datetime.timedelta(days=days)
 
-    # RA policy: a leaf VEN signing identity. Extensions are set by the RA, NOT
-    # copied blindly from the CSR (the requester does not get to choose them).
-    cert = (
+    # Extensions are set by the CA from the profile, NOT copied from the CSR:
+    # the requester does not get to choose what its certificate is good for.
+    builder = (
         x509.CertificateBuilder()
         .subject_name(csr.subject)
         .issuer_name(_ca_cert.subject)
@@ -97,23 +133,22 @@ def issue_from_csr(csr_pem: str, days: int = 365) -> dict:
         .add_extension(
             x509.KeyUsage(
                 digital_signature=True, content_commitment=False,
-                key_encipherment=False, data_encipherment=False,
+                key_encipherment=rules["key_encipherment"], data_encipherment=False,
                 key_agreement=False, key_cert_sign=False, crl_sign=False,
                 encipher_only=False, decipher_only=False,
             ),
             critical=True,
         )
-        .add_extension(
-            x509.ExtendedKeyUsage([x509.ExtendedKeyUsageOID.CLIENT_AUTH]),
-            critical=False,
-        )
+        .add_extension(x509.ExtendedKeyUsage(rules["eku"]), critical=False)
         .add_extension(x509.SubjectKeyIdentifier.from_public_key(public_key), critical=False)
         .add_extension(
             x509.AuthorityKeyIdentifier.from_issuer_public_key(_ca_cert.public_key()),
             critical=False,
         )
-        .sign(_ca_key, hashes.SHA256())
     )
+    if san:
+        builder = builder.add_extension(_san(san), critical=False)
+    cert = builder.sign(_ca_key, hashes.SHA256())
 
     serial_hex = format(serial, "x")
     registry.record(serial_hex, key_id, cert.subject.rfc4514_string(), now, not_after)

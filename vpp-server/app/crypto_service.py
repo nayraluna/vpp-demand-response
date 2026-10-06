@@ -5,12 +5,11 @@ import jwt  # PyJWT - JWS/JOSE container (PAS4)
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa, ec
-from cryptography.hazmat.primitives.serialization import pkcs12
 
 CERTS_DIR = Path(__file__).resolve().parent.parent.parent / "certs"
-P12_FILE = CERTS_DIR / "vpp.p12"
+KEY_FILE = CERTS_DIR / "vpp.key"
+CERT_FILE = CERTS_DIR / "vpp.crt"
 CA_CERT_FILE = CERTS_DIR / "CA.crt"
-P12_PASSWORD = b"changeit"
 
 _private_key = None
 _certificate = None
@@ -19,13 +18,12 @@ _ca_certificate = None
 
 def initialize() -> None:
     global _private_key, _certificate, _ca_certificate
-    with open(P12_FILE, "rb") as f:
-        _private_key, _certificate, _chain = pkcs12.load_key_and_certificates(
-            f.read(), P12_PASSWORD
-        )
-    if _private_key is None or _certificate is None:
-        raise RuntimeError(f"Could not load key/certificate from {P12_FILE}")
-    _ca_certificate = x509.load_pem_x509_certificate(CA_CERT_FILE.read_bytes())
+    try:
+        _private_key = serialization.load_pem_private_key(KEY_FILE.read_bytes(), password=None)
+        _certificate = x509.load_pem_x509_certificate(CERT_FILE.read_bytes())
+        _ca_certificate = x509.load_pem_x509_certificate(CA_CERT_FILE.read_bytes())
+    except FileNotFoundError as e:
+        raise RuntimeError(f"VPP not provisioned: {e.filename} missing, run provision.py")
 
 
 def issued_by_ra(cert: x509.Certificate) -> bool:

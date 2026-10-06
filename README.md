@@ -74,7 +74,7 @@ The Android client is covered too. `RegistrationFlowTest` drives the real protoc
 ## Running it
 
 ```bash
-cd certs && bash make_certs.sh && cd ..      # Git Bash + openssl
+python provision_all.py                      # root, then each component's own key and CSR
 python -m venv .venv && .venv\Scripts\activate
 pip install -r requirements.txt
 powershell -ExecutionPolicy Bypass -File .\run_all.ps1
@@ -82,7 +82,7 @@ powershell -ExecutionPolicy Bypass -File .\run_all.ps1
 
 That is the whole system verified against itself. Driving it by hand instead, with the phone, a Raspberry Pi and the synthetic fleet, is [RUNBOOK.md](RUNBOOK.md), and [TROUBLESHOOTING.md](TROUBLESHOOTING.md) covers what looks broken but is not.
 
-> **No key material of any kind is in this repository.** `make_certs.sh` builds the entire PKI locally, and `*.key`, `*.pem`, `*.p12`, `*.crt` and friends are refused by `.gitignore` as patterns rather than paths, so a key written somewhere new is still caught. Two exceptions are explicit and public: the Spanish national police DNIe root, and the development CA root the Android app needs to compile. The `changeit` PKCS#12 password is a placeholder for locally generated test material and is overridable with `P12_PASS`.
+> **No key material of any kind is in this repository.** `provision_all.py` builds the entire PKI locally, each component generating its own key pair and obtaining its certificate from a CSR, and `*.key`, `*.pem`, `*.p12`, `*.crt` and friends are refused by `.gitignore` as patterns rather than paths, so a key written somewhere new is still caught. Two exceptions are explicit and public: the Spanish national police DNIe root, and the development CA root the Android app needs to compile.
 
 ## Building the Android app
 

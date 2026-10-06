@@ -48,6 +48,22 @@ def _fetch() -> tuple[str, dict]:
     return token, jwt.decode(token, _anchor(), algorithms=["RS256"])
 
 
+def _discard_relay_copy_if_foreign() -> None:
+    """Once per process, before the first fetch. The relay copy only ever moves
+    to a higher list number, which is right while the CA stays the same and
+    wrong the moment the root is regenerated: the old list would then sit at a
+    number the new CA takes months to reach, and the appliance would be handed
+    a list that no longer chains. A copy that does not verify against the
+    current root is not a list at all, so it is dropped."""
+    stored = db.get_crl()
+    if stored is None:
+        return
+    try:
+        jwt.decode(stored, _anchor(), algorithms=["RS256"])
+    except Exception:
+        db.clear_crl()
+
+
 def current() -> dict:
     """The verified list, refreshed once the cached copy is older than MAX_AGE.
 
@@ -56,6 +72,8 @@ def current() -> dict:
     does this refuse to answer, and callers then fail closed."""
     global _crl, _fetched_at
     with _lock:
+        if _crl is None:
+            _discard_relay_copy_if_foreign()
         if _crl is None or time.monotonic() - _fetched_at > MAX_AGE:
             try:
                 token, fresh = _fetch()
