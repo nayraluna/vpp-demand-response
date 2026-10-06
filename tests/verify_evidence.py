@@ -209,26 +209,36 @@ def main():
             if r.status_code == 409 else die(f"expected 409, got {r.status_code}")
 
         print("G5: evidence must match the activation it claims")
-        # Same activation, but the nonce is not the one the VPP issued.
+        # A genuine appliance signature over an activation that was issued to
+        # ANOTHER appliance: knowing an identifier must not be enough.
         sys.path.insert(0, str(ROOT / "appliance"))
         import hsm
         hsm.initialize()
-        bad_nonce = hsm.sign_jws({
-            "activation_id": act_id, "ven": hsm.subject(),
+        foreign_id = f"act-{secrets.token_hex(16)}"
+        with sqlite3.connect(str(DB_FILE)) as c:
+            c.execute(
+                """INSERT INTO activations(activation_id, ven_subject, day, slot_start,
+                       slot_end, action, issued_at, ends_at, delivered_at)
+                   VALUES(?,'CN=some-other-appliance','mon',30,32,'reduce',
+                          '2026-01-01T00:00:00+00:00',NULL,NULL)""", (foreign_id,))
+        foreign = hsm.sign_jws({
+            "activation_id": foreign_id, "ven": hsm.subject(),
             "date": "2026-08-10", "time": "15:00",
             "executed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "reduction_pct": 50, "nonce": secrets.token_hex(16)},
+            "reduction_pct": 50},
             typ="application/dr-evidence+json")
-        r = requests.post(f"{MTLS}/evidence", json={"evidence": bad_nonce},
+        r = requests.post(f"{MTLS}/evidence", json={"evidence": foreign},
                           cert=VEN_CLIENT, verify=CA_FILE)
-        ok(f"wrong nonce refused: {r.json()['error']}") if r.status_code == 400 \
-            else die(f"expected 400, got {r.status_code} {r.text}")
+        ok(f"another appliance's activation refused: {r.json()['error']}") \
+            if r.status_code == 400 else die(f"expected 400, got {r.status_code} {r.text}")
+        with sqlite3.connect(str(DB_FILE)) as c:
+            c.execute("DELETE FROM activations WHERE activation_id=?", (foreign_id,))
 
         unknown = hsm.sign_jws({
             "activation_id": "act-does-not-exist", "ven": hsm.subject(),
             "date": "2026-08-10", "time": "15:00",
             "executed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "reduction_pct": 50, "nonce": secrets.token_hex(16)},
+            "reduction_pct": 50},
             typ="application/dr-evidence+json")
         r = requests.post(f"{MTLS}/evidence", json={"evidence": unknown},
                           cert=VEN_CLIENT, verify=CA_FILE)
@@ -241,7 +251,7 @@ def main():
             "activation_id": act_id, "ven": ven,
             "date": "2026-08-10", "time": "15:00",
             "executed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "reduction_pct": 100, "nonce": secrets.token_hex(16)},
+            "reduction_pct": 100},
             "application/dr-evidence+json")
         r = requests.post(f"{MTLS}/evidence", json={"evidence": forged},
                           cert=VEN_CLIENT, verify=CA_FILE)

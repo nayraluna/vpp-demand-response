@@ -233,8 +233,8 @@ class Handler(BaseHTTPRequestHandler):
         """The appliance retrieves its pending activations (OpenADR pull model).
 
         The channel already authenticated both ends, so the appliance knows the
-        activation comes from the legitimate VPP; the activation identifier and
-        the nonce are what protect it once it has left the channel.
+        activation comes from the legitimate VPP. The random activation
+        identifier is what protects it once it has left the channel.
         """
         if db.get_registration(ven_subject) is None:
             return self._json(403, {"error": "appliance is not a registered VEN",
@@ -255,9 +255,9 @@ class Handler(BaseHTTPRequestHandler):
         """Operational step 3: issue activations to the selected appliances.
 
         Selection runs first; if the request cannot be served nothing is
-        activated (409). Each activation carries an activation identifier and a
-        128-bit nonce, which is what stops a captured activation from being
-        replayed once it has left the channel.
+        activated (409). Each activation carries a random 128-bit identifier,
+        which is what stops a captured activation from being replayed once it
+        has left the channel, and what the evidence later has to name.
         """
         if not self._is_operator(cert):
             return self._json(403, {"error": "only the DR operator may activate"})
@@ -281,13 +281,12 @@ class Handler(BaseHTTPRequestHandler):
         issued = []
         for chosen in selection["selected"]:
             activation = {
-                "activation_id": "act-" + secrets.token_hex(8),
+                "activation_id": "act-" + secrets.token_hex(16),
                 "ven_subject": chosen["ven"],
                 "day": selection["day"],
                 "slot_start": selection["slot_start"],
                 "slot_end": selection["slot_end"],
                 "action": action,
-                "nonce": secrets.token_hex(16),      # 128-bit, makes it unique
                 "issued_at": now.isoformat(),
                 "ends_at": ends_at.isoformat(),
             }

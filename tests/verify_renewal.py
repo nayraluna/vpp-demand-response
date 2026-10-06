@@ -125,10 +125,9 @@ def inject_activation(ven: str, act_id: str) -> None:
     with sqlite3.connect(str(DB_FILE)) as c:
         c.execute(
             """INSERT INTO activations(activation_id, ven_subject, day, slot_start, slot_end,
-                   action, nonce, issued_at, ends_at, delivered_at)
-               VALUES(?,?,?,?,?,'reduce',?,?,NULL,NULL)""",
-            (act_id, ven, DAYS[now.weekday()], slot, min(slot + 1, 48),
-             secrets.token_hex(16), now.isoformat()))
+                   action, issued_at, ends_at, delivered_at)
+               VALUES(?,?,?,?,?,'reduce',?,NULL,NULL)""",
+            (act_id, ven, DAYS[now.weekday()], slot, min(slot + 1, 48), now.isoformat()))
 
 
 def main():

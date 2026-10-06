@@ -53,9 +53,6 @@ def verify(jws_token: str, submitter_subject: str) -> dict:
         raise InvalidEvidence(f"unknown activation {activation_id!r}")
     if activation["ven_subject"] != ven_subject:
         raise InvalidEvidence("activation was issued to a different appliance")
-    # The nonce ties the evidence to that specific activation instance.
-    if payload.get("nonce") != activation["nonce"]:
-        raise InvalidEvidence("evidence does not carry the activation nonce")
 
     # (5) one execution may only be claimed once
     if db.get_evidence(activation_id) is not None:

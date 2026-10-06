@@ -163,8 +163,6 @@ def _check(activation: dict, cfg: dict, now: datetime.datetime) -> str | None:
     """Return the reason to refuse this activation, or None to accept it."""
     if activation["activation_id"] in cfg["processed"]:
         return "activation already processed (replay)"
-    if activation["nonce"] in cfg["seen_nonces"]:
-        return "nonce already seen (replay)"
 
     # Fail closed on revocation. Without a list that is still inside its
     # validity window the appliance cannot know whether the parties it relies
@@ -293,7 +291,6 @@ def _poll_and_process() -> dict:
         reason = _check(activation, cfg, now)
         # Seen once, never accepted twice - even if we refuse it.
         cfg["processed"].append(activation["activation_id"])
-        cfg["seen_nonces"].append(activation["nonce"])
         if reason:
             refused.append({"activation_id": activation["activation_id"],
                             "reason": reason})
@@ -312,7 +309,6 @@ def _poll_and_process() -> dict:
             "day": activation["day"],
             "slot_start": activation["slot_start"],
             "slot_end": activation["slot_end"],
-            "nonce": activation["nonce"],
             "executed_at": now.isoformat(),
             "ends_at": window_end.isoformat(),
             # A real appliance measures this; the emulated one delivers what was
@@ -368,7 +364,6 @@ def _submit_evidence() -> dict:
             "time": executed.strftime("%H:%M"),
             "executed_at": record["executed_at"],
             "reduction_pct": record["reduction_pct"],
-            "nonce": record["nonce"],          # ties it to that activation
         }, typ="application/dr-evidence+json")
 
         result = vtn_client.submit_evidence(

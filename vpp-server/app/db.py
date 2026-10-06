@@ -27,11 +27,15 @@ def initialize() -> None:
                    slot_start    INTEGER NOT NULL,
                    slot_end      INTEGER NOT NULL,
                    action        TEXT NOT NULL,
-                   nonce         TEXT NOT NULL,
                    issued_at     TEXT NOT NULL,
                    ends_at       TEXT,
                    delivered_at  TEXT)"""
         )
+        # Databases created before the nonce was dropped still carry the column.
+        try:
+            c.execute("ALTER TABLE activations DROP COLUMN nonce")
+        except sqlite3.OperationalError:
+            pass  # already gone
         c.execute(
             """CREATE TABLE IF NOT EXISTS vens(
                    ven_subject     TEXT PRIMARY KEY,
@@ -168,12 +172,11 @@ def add_activation(activation: dict) -> None:
     with _conn() as c:
         c.execute(
             """INSERT INTO activations(activation_id, ven_subject, day, slot_start,
-                   slot_end, action, nonce, issued_at, ends_at, delivered_at)
-               VALUES(?,?,?,?,?,?,?,?,?,NULL)""",
+                   slot_end, action, issued_at, ends_at, delivered_at)
+               VALUES(?,?,?,?,?,?,?,?,NULL)""",
             (activation["activation_id"], activation["ven_subject"],
              activation["day"], activation["slot_start"], activation["slot_end"],
-             activation["action"], activation["nonce"], activation["issued_at"],
-             activation["ends_at"]),
+             activation["action"], activation["issued_at"], activation["ends_at"]),
         )
 
 
@@ -181,7 +184,7 @@ def pending_activations(ven_subject: str) -> list[dict]:
     """Activations issued to this appliance that it has not yet retrieved."""
     with _conn() as c:
         rows = c.execute(
-            """SELECT activation_id, day, slot_start, slot_end, action, nonce,
+            """SELECT activation_id, day, slot_start, slot_end, action,
                       issued_at, ends_at
                FROM activations
                WHERE ven_subject=? AND delivered_at IS NULL
@@ -189,8 +192,8 @@ def pending_activations(ven_subject: str) -> list[dict]:
             (ven_subject,),
         ).fetchall()
     return [{"activation_id": r[0], "day": r[1], "slot_start": r[2],
-             "slot_end": r[3], "action": r[4], "nonce": r[5],
-             "issued_at": r[6], "ends_at": r[7]} for r in rows]
+             "slot_end": r[3], "action": r[4],
+             "issued_at": r[5], "ends_at": r[6]} for r in rows]
 
 
 def mark_delivered(activation_id: str, delivered_at: str) -> None:
@@ -203,7 +206,7 @@ def get_activation(activation_id: str) -> dict | None:
     with _conn() as c:
         row = c.execute(
             """SELECT activation_id, ven_subject, day, slot_start, slot_end,
-                      action, nonce, issued_at, ends_at, delivered_at
+                      action, issued_at, ends_at, delivered_at
                FROM activations WHERE activation_id=?""",
             (activation_id,),
         ).fetchone()
@@ -211,8 +214,7 @@ def get_activation(activation_id: str) -> dict | None:
         return None
     return {"activation_id": row[0], "ven_subject": row[1], "day": row[2],
             "slot_start": row[3], "slot_end": row[4], "action": row[5],
-            "nonce": row[6], "issued_at": row[7], "ends_at": row[8],
-            "delivered_at": row[9]}
+            "issued_at": row[6], "ends_at": row[7], "delivered_at": row[8]}
 
 
 def get_evidence(activation_id: str) -> dict | None:

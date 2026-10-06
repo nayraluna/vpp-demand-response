@@ -180,11 +180,10 @@ def main():
         with sqlite3.connect(str(DB_FILE)) as c:
             c.execute(
                 """INSERT INTO activations(activation_id, ven_subject, day,
-                       slot_start, slot_end, action, nonce, issued_at, ends_at,
-                       delivered_at)
-                   VALUES('act-unproven',?,'tue',?,?,'reduce',?,
+                       slot_start, slot_end, action, issued_at, ends_at, delivered_at)
+                   VALUES('act-unproven',?,'tue',?,?,'reduce',
                           '2026-01-01T00:00:00+00:00',NULL,NULL)""",
-                (ven, av.slot_index(15), av.slot_index(17), secrets.token_hex(16)))
+                (ven, av.slot_index(15), av.slot_index(17)))
         r = requests.get(f"{MTLS}/participation", cert=uclient, verify=CA_FILE)
         after = r.json()
         ok("an unproven activation adds no reward "

@@ -23,7 +23,6 @@ FACTORY_DEFAULTS = {
     "crl_next_update": None,    # when that list stops being trusted
     "crl_revoked": [],          # serials it lists
     "processed": [],            # activation ids already handled (replay protection)
-    "seen_nonces": [],          # nonces already seen  (replay protection)
     "last_activation": None,    # what the appliance is currently doing
     "history": [],              # activations executed, for the evidence step
     "submitted": [],            # activations whose evidence the VPP accepted
