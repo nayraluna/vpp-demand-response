@@ -265,12 +265,7 @@ on an existing setup.
    ```
 2. Start the PC services on `0.0.0.0`
    ([step 2](#2-services-for-manual-testing), without pinning loopback).
-3. **Factory reset the PC's local appliance**, otherwise it competes with the Pi as the same `ven-0001`:
-
-   ```powershell
-   Invoke-RestMethod -Method Post http://127.0.0.1:8082/factory-reset
-   ```
-4. ```powershell
+3. ```powershell
    python tests/verify_pi.py http://<pi-address>:8082 <pc-lan-address>
    ```
 
@@ -278,7 +273,7 @@ Prints `11 checks passed`: pairing over a real network, self registration, an
 activation retrieved by the Pi's outbound poll, single delivery, evidence
 signed on the device, and 2.0 kWh to 0.30 EUR.
 
-`verify_pi` wipes `evidence` and `activations` and re-pairs `ven-0001` with a fresh test user, so the phone stops seeing the appliance.
+`verify_pi` wipes `evidence` and `activations` and re-pairs the Pi with a fresh test user, so the phone stops seeing the appliance.
 
 ---
 
@@ -298,8 +293,14 @@ Regenerating it invalidates every existing certificate. Full order:
 4. App: copy `certs/CA.crt` over `android-app/app/src/main/res/raw/ca.crt`,
    rebuild, reinstall the APK, log out in the app and register again.
 5. Operator: `python backoffice/dr_operator.py init --force`.
-6. Pi: copy `certs/VEN.crt`, `certs/VEN.key` and `certs/CA.crt` to the Pi's
-   `~/certs/`, restart `appliance.service`, factory reset the Pi with
+6. Pi: the device keeps its own key and its own identity, so nothing private
+   is copied. On the Pi, `python appliance/provision.py request --ven ven-0002`
+   writes `~/certs/VEN.key` and `~/certs/VEN.csr`. Copy only the CSR to the PC
+   and sign it there,
+   `python ca/sign_csr.py --csr VEN.csr --out VEN.crt --profile client`, then
+   copy `VEN.crt` and `certs/CA.crt` to the Pi's `~/certs/` and run
+   `python appliance/provision.py install certs/VEN.crt certs/CA.crt` there.
+   Restart `appliance.service`, factory reset the Pi with
    `POST http://<pi-address>:8082/factory-reset`, and re-pair it.
 7. Verify in order: `run_all.ps1`, then the JVM flow test, then `verify_pi.py`.
 

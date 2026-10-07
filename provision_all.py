@@ -71,7 +71,8 @@ def main() -> None:
                         "print(f'  {sys.argv[1]:16} {c.subject.rfc4514_string()}')",
                         str(CERTS / name)], check=True)
     print("\nNext: copy certs/CA.crt over android-app/app/src/main/res/raw/ca.crt and rebuild"
-          " the APK, reissue the operator credential, and redeploy VEN.* and CA.crt on the Pi.")
+          " the APK, reissue the operator credential, and re-provision the Pi from its own CSR"
+          " (RUNBOOK.md, appendix).")
 
 
 if __name__ == "__main__":

@@ -34,7 +34,7 @@ Everything rests on a single X.509 trust root.
 
 **Every channel that crosses the network is mutually authenticated.** The listener reads the client certificate off the TLS socket and maps its subject to an account and a role, so authentication and authorisation stay separate.
 
-**Four artefacts are signed as JWS, independently of the channel that carries them**, because a channel proves who *delivered* a message, not who *produced* it:
+**Every artefact that has to outlive the channel that carries it is signed as JWS**, because a channel proves who *delivered* a message, not who *produced* it:
 
 | Artefact | Signed by | Purpose |
 |---|---|---|
@@ -42,10 +42,14 @@ Everything rests on a single X.509 trust root.
 | Owner proof | Appliance HSM | Binds the device to its owner and its certified parameters |
 | Availability calendar | User | Weekly schedule, with a monotonic version that blocks rollback |
 | Participation evidence | Appliance HSM | The signed record a reward requires |
+| Revocation list | CA | The withdrawn serials, numbered monotonically and valid 24 h, relayed to the appliance in every poll |
+| Revocation and renewal requests | Operator, certificate holder | Carry their own certificate, because the CA's listener has no client certificates |
 
 The user's half of that never leaves the phone. The key is generated inside the Android Keystore and is non-exportable, so the app signs the CSR, the pairing bundle, the calendar and the mTLS handshake in place rather than holding key material it could leak.
 
-**The appliance enforces its owner's calendar locally.** Not even the platform's own coordinator can activate it outside the declared slots, its maximum curtailment time, or its recovery period. Activations reach it by outbound polling only, so nothing ever connects *into* the home.
+**The appliance enforces its owner's calendar locally.** Not even the platform's own coordinator can activate it outside the declared slots, its maximum curtailment time, or its recovery period. Activations reach it by outbound polling only, so nothing ever connects *into* the home. It trusts only the root installed at the factory next to its signing key, so a pairing bundle cannot bring its own.
+
+**Credentials can be withdrawn and renewed.** An operator revokes a certificate by serial with a signed request, and the CA publishes its revocation list as a JWS under the root key, numbered monotonically and valid for 24 hours. The VPP checks the list on every mutual-TLS request and at enrolment, and relays it to the appliance, which verifies it against its factory root, refuses one with a lower number and stops acting when its copy expires. Renewal re-keys under the same subject and revokes the old certificate as superseded, so one identity never has two live certificates.
 
 **Identity proof with the Spanish national eID.** The app reads the DNIe over NFC through a PACE secure channel, validates the card's chain up to the `AC RAIZ DNIE 2` root, and has the chip sign a freshly generated nonce with the user's PIN, so a copied public certificate cannot pass for a login.
 
@@ -55,7 +59,7 @@ The user's half of that never leaves the phone. The key is generated inside the 
 powershell -ExecutionPolicy Bypass -File .\run_all.ps1
 ```
 
-The suite runs 14 gates and 138 checks. Every protocol step is exercised against its positive *and* its negative cases over the real stack, with real TLS and a real database: certificates outside the CA chain, invalid signatures, replayed activations, forged capacities, evidence submitted twice. The database is used as an attack vector too, planting a rolled-back calendar and one signed by a forged issuer directly into the row the appliance polls, to show the device refuses them on its own.
+The suite runs 16 gates and 177 checks. Every protocol step is exercised against its positive *and* its negative cases over the real stack, with real TLS and a real database: certificates outside the CA chain, invalid signatures, replayed activations, forged capacities, evidence submitted twice, revoked credentials at the mutual-TLS door, a rolled-back revocation list. The database is used as an attack vector too, planting a rolled-back calendar and one signed by a forged issuer directly into the row the appliance polls, to show the device refuses them on its own.
 
 The Android client is covered too. `RegistrationFlowTest` drives the real protocol clients against the live local servers from the JVM, which is why those clients import nothing from Android.
 
@@ -63,9 +67,8 @@ The Android client is covered too. `RegistrationFlowTest` drives the real protoc
 
 ## What this prototype does not do
 
-- **No revocation or renewal.** A compromised credential cannot be withdrawn, and the DNIe's revocation status is not checked.
+- **Revocation is a signed list, not OCSP.** The list is a JWS under the root key rather than an RFC 5280 CRL, the certificates carry no distribution point, and the VPP keeps its last copy past `next_update` when the CA is unreachable. The DNIe's own revocation status is not checked.
 - **Issuance-side validation is missing.** The CA verifies possession of the key but not the identity behind it, nor the operator role attribute. Both checks belong in the RA role and currently rest on the requesting side.
-- **Trust on first use at pairing.** The prototype appliance ships without the CA root and adopts the one delivered in the first configuration bundle. In production it would be provisioned at the factory.
 - **The HSM is emulated and the curtailment is simulated.** A signature proves the appliance produced the evidence, not that power flowed differently. Real metering behind the same signing boundary is the natural next step.
 - **Stored evidence is verified once, at submission.** No later path compares a participation row against the signature stored beside it, and the reward is computed from the row's own columns. A `reduction_pct` edited in the database would change a payout without invalidating anything. The availability path is the opposite: the appliance re-verifies the calendar on every poll, which is why a rolled-back row planted directly in the table is refused.
 - **Selection is a deterministic greedy heuristic**, not an optimisation. Fairness across households is not considered.
@@ -73,10 +76,11 @@ The Android client is covered too. `RegistrationFlowTest` drives the real protoc
 
 ## Running it
 
-```bash
-python provision_all.py                      # root, then each component's own key and CSR
-python -m venv .venv && .venv\Scripts\activate
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
+python provision_all.py                      # root, then each component's own key and CSR
 powershell -ExecutionPolicy Bypass -File .\run_all.ps1
 ```
 

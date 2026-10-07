@@ -5,13 +5,14 @@ the most time. Read this before concluding anything is broken.
 
 ## The Raspberry Pi steals activations
 
-A powered Pi stays paired as `ven-0001` and polls every 60 seconds. It shares
-that identity with the appliance running on the PC, so whichever polls first
-consumes the activation and the other reports `polled: 0`.
-
-`run_all.ps1` isolates itself by pinning mutual TLS to loopback, so the gates
-are safe. Manual testing with services on `0.0.0.0` is not. **Keep the Pi off
-for everything except the physical validation step.**
+Only if the Pi was provisioned with a copy of the PC appliance's key. Two
+devices under one identity poll as the same `ven-0001`, so whichever polls
+first consumes the activation and the other reports `polled: 0`. The fix is
+to give the Pi its own key and identity, step 6 of the
+[RUNBOOK appendix](RUNBOOK.md#appendix-regenerating-the-ca). Until then,
+`run_all.ps1` is safe because it pins mutual TLS to loopback, manual testing
+on `0.0.0.0` is not. **Keep the Pi off for everything except the physical
+validation step.**
 
 ## Slots are UTC, your clock is not
 
