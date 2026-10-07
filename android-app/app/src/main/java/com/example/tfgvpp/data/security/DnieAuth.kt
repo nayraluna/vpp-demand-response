@@ -136,7 +136,7 @@ class DnieAuth(dnieRootInput: InputStream) {
         val tamperRejected = !verify(authCert, tampered, signature)
 
         val diagnostic = if (proofOfPossession) null else
-            buildDiagnostic(keyStore, alias, authCert, provider, nonce, signature)
+            buildDiagnostic(keyStore, alias, nonce, signature)
 
         return Result(
             holderName = buildHolderName(subject),
@@ -160,14 +160,14 @@ class DnieAuth(dnieRootInput: InputStream) {
      *  2. WHICH certificate the signature actually verifies against, if any --
      *     a match on a different alias means the SDK associated the selected
      *     certificate with the WRONG private key (key/cert mapping swap).
-     *  3. Whether the OTHER alias's key produces a signature that verifies
-     *     against the selected certificate (the swap seen from the other side).
-     * All probing is best-effort: the card is already open and the PIN cached,
-     * but any per-alias failure is reported instead of aborting.
+     * Everything here works on public material only. The card's other key is
+     * the qualified signature key, and under eIDAS whatever it signs is a
+     * qualified electronic signature of the holder, so no diagnostic may ever
+     * drive it, not even over a random nonce.
      */
     private fun buildDiagnostic(
-        keyStore: KeyStore, selectedAlias: String, authCert: X509Certificate,
-        provider: Provider, nonce: ByteArray, signature: ByteArray,
+        keyStore: KeyStore, selectedAlias: String,
+        nonce: ByteArray, signature: ByteArray,
     ): String = buildString {
         appendLine("DIAGNOSTIC (possession proof failed):")
         val aliases = try { keyStore.aliases().toList() } catch (e: Exception) { emptyList() }
@@ -191,16 +191,6 @@ class DnieAuth(dnieRootInput: InputStream) {
             appendLine("      the signature verifies with: " +
                     (matching.takeIf { it.isNotEmpty() }?.joinToString() ?: "(none)"))
             appendLine("      raw RSA probe: ${rawRsaProbe(cert, nonce, signature)}")
-        }
-        for (a in aliases.filter { it != selectedAlias }) {
-            try {
-                val otherKey = keyStore.getKey(a, null) as? PrivateKey ?: continue
-                val probe = sign(otherKey, provider, nonce)
-                if (verify(authCert, nonce, probe))
-                    appendLine("  the KEY of [$a] matches the certificate in use (crossed key/cert mapping)")
-            } catch (e: Exception) {
-                appendLine("  probe with [$a]'s key: ${e.javaClass.simpleName}: ${e.message?.take(80)}")
-            }
         }
     }.trimEnd()
 
