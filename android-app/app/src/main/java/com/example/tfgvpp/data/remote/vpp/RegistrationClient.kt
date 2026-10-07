@@ -126,7 +126,7 @@ class RegistrationClient(caInput: InputStream) {
     }
 
     private fun chainsToRa(cert: X509Certificate): Boolean =
-        try { cert.verify(caCertificate.publicKey); true } catch (e: Exception) { false }
+        try { cert.verify(caCertificate.publicKey); cert.checkValidity(); true } catch (e: Exception) { false }
 
     private fun postJson(url: String, body: Map<String, Any>): Map<String, Any> {
         val req = Request.Builder().url(url)

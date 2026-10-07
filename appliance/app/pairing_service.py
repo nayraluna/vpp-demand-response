@@ -35,6 +35,14 @@ def _issued_by(cert: x509.Certificate, issuer: x509.Certificate) -> bool:
         return False
 
 
+def _within_validity(cert: x509.Certificate) -> bool:
+    """The signature proves the CA issued it, not that it is still current.
+    An expired certificate also leaves the revocation list, so this is what
+    keeps a withdrawn credential refused after its own expiry date."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return cert.not_valid_before_utc <= now <= cert.not_valid_after_utc
+
+
 def pair(jws_token: str) -> dict:
     cfg = device_config.load()
     if cfg["state"] != 0:
@@ -75,8 +83,12 @@ def pair(jws_token: str) -> dict:
         raise InvalidBundle(f"missing/invalid VPP certificate in bundle: {e}")
     if not _issued_by(owner, cert_ra):
         raise InvalidBundle("owner certificate not issued by the platform CA")
+    if not _within_validity(owner):
+        raise InvalidBundle("owner certificate expired or not yet valid")
     if not _issued_by(cert_vpp, cert_ra):
         raise InvalidBundle("VPP certificate not issued by the platform CA")
+    if not _within_validity(cert_vpp):
+        raise InvalidBundle("VPP certificate expired or not yet valid")
 
     # 4. Store the configuration and leave pairing mode (state 0 -> 1). The
     # trust anchor for every later call to the VPP is the factory root itself.

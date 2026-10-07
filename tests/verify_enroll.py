@@ -71,6 +71,28 @@ def self_signed(cn: str) -> str:
     return cert.public_bytes(serialization.Encoding.PEM).decode()
 
 
+def expired_from_ca(cn: str):
+    """A certificate the CA really signed, whose validity ended yesterday. The
+    CA key is read here only to mint this fixture: the gate is about the
+    verifier, which must not accept a genuine signature past its date."""
+    ca = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
+    ca_key = serialization.load_pem_private_key((Path(CA_FILE).parent / "CA.key").read_bytes(), None)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)]))
+        .issuer_name(ca.subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=2))
+        .not_valid_after(now - datetime.timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .sign(ca_key, hashes.SHA256())
+    )
+    return key, cert.public_bytes(serialization.Encoding.PEM).decode()
+
+
 def main():
     ca = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
     cn = f"user-{secrets.token_hex(3)}"
@@ -101,6 +123,13 @@ def main():
                        verify=CA_FILE)
     ok("self-signed (non-RA) certificate rejected (403)") \
         if r3.status_code == 403 else die(f"expected 403, got {r3.status_code}")
+
+    print("G5: a genuine but expired certificate is rejected")
+    _k, expired = expired_from_ca(f"expired-{secrets.token_hex(3)}")
+    r4 = requests.post(f"{VPP}/enroll", json={"certificate": expired}, verify=CA_FILE)
+    ok(f"expired certificate rejected (403): {r4.json().get('detail', '')}") \
+        if r4.status_code == 403 and "expired" in r4.text \
+        else die(f"expected 403 expired, got {r4.status_code} {r4.text}")
 
     print(f"\nUSER ENROLLMENT COMPLETE: {passed} checks passed.")
 

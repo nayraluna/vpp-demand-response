@@ -14,7 +14,7 @@ import hsm  # noqa: E402
 import vtn_client  # noqa: E402
 
 from . import config as device_config  # noqa: E402
-from .pairing_service import _issued_by  # noqa: E402
+from .pairing_service import _issued_by, _within_validity  # noqa: E402
 
 SLOT_MINUTES = 30
 SLOTS_PER_DAY = 24 * 60 // SLOT_MINUTES
@@ -107,6 +107,9 @@ def _adopt_calendar(jws_token: str, cfg: dict) -> dict:
     if not _issued_by(owner, ra_cert):
         return {"status": "refused",
                 "reason": "calendar signer not certified by the CA"}
+    if not _within_validity(owner):
+        return {"status": "refused",
+                "reason": "calendar signer certificate expired or not yet valid"}
 
     # A signer the CA has since withdrawn is refused even though its signature
     # still verifies: the list adopted earlier in this same poll decides.

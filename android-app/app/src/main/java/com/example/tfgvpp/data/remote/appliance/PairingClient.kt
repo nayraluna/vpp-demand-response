@@ -106,7 +106,7 @@ class PairingClient(caInput: InputStream, private val registration: Registration
         val signatureValid = (venCert.publicKey as? RSAPublicKey)
             ?.let { jws.verify(RSASSAVerifier(it)) } ?: false
         val chainsToRa =
-            try { venCert.verify(caCertificate.publicKey); true } catch (e: Exception) { false }
+            try { venCert.verify(caCertificate.publicKey); venCert.checkValidity(); true } catch (e: Exception) { false }
 
         val claims = jws.payload.toJSONObject()
         val ownerMatches = claims["owner"] == registration.credential.subject

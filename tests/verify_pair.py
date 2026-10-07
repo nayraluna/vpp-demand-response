@@ -89,6 +89,28 @@ def fake_platform():
     return pem(root), user_key, pem(user), pem(vpp)
 
 
+def expired_from_ca(cn: str):
+    """A certificate the CA really signed, whose validity ended yesterday. The
+    CA key is read here only to mint this fixture: the gate is about the
+    verifier, which must not accept a genuine signature past its date."""
+    ca = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
+    ca_key = serialization.load_pem_private_key((Path(CA_FILE).parent / "CA.key").read_bytes(), None)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)]))
+        .issuer_name(ca.subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=2))
+        .not_valid_after(now - datetime.timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .sign(ca_key, hashes.SHA256())
+    )
+    return key, cert.public_bytes(serialization.Encoding.PEM).decode()
+
+
 def bundle() -> dict:
     """What the app sends: how to reach the VPP. NOT the appliance parameters -
     those are device properties the appliance itself reports back."""
@@ -133,6 +155,14 @@ def main():
     r = requests.get(f"{APP}/ping")
     ok("appliance still unpaired after the attempt") if r.json()["state"] == 0 \
         else die("the fake platform paired the appliance")
+
+    # Genuinely issued by the CA, expired yesterday. The signature verifies,
+    # the date does not, and the device must look at both.
+    ekey, ecert = expired_from_ca(f"expired-{secrets.token_hex(3)}")
+    r = requests.post(f"{APP}/pair", json={"jws": make_jws(ekey, ecert, bundle())})
+    ok(f"expired owner certificate rejected (400): {r.json().get('detail', '')}") \
+        if r.status_code == 400 and "expired" in r.text \
+        else die(f"expected 400 expired, got {r.status_code} {r.text}")
 
     print("G2: a correct bundle pairs the appliance")
     r = requests.post(f"{APP}/pair", json={"jws": token})

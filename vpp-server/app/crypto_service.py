@@ -1,4 +1,5 @@
 import base64
+import datetime
 from pathlib import Path
 
 import jwt  # PyJWT - JWS/JOSE container (PAS4)
@@ -38,6 +39,15 @@ def issued_by_ra(cert: x509.Certificate) -> bool:
         # Fail closed: a bad signature, a foreign signature scheme, or a
         # malformed certificate all mean "not a platform identity".
         return False
+
+
+def within_validity(cert: x509.Certificate) -> bool:
+    """True if `cert` is inside its validity period right now. The CA's
+    signature says the certificate was genuine, not that it still is: an
+    expired one also drops out of the revocation list, so without this check
+    a withdrawn credential would become acceptable again the day it expires."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return cert.not_valid_before_utc <= now <= cert.not_valid_after_utc
 
 
 def subject() -> str:

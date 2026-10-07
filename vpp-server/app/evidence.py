@@ -29,6 +29,8 @@ def verify(jws_token: str, submitter_subject: str) -> dict:
     # (1) the signing appliance must be certified by the RA
     if not crypto_service.issued_by_ra(ven_cert):
         raise InvalidEvidence("appliance certificate not issued by the RA")
+    if not crypto_service.within_validity(ven_cert):
+        raise InvalidEvidence("appliance certificate expired or not yet valid")
 
     # (2) the signature must verify under that certified key
     ven_pub = ven_cert.public_key().public_bytes(

@@ -43,6 +43,8 @@ def enroll(req: EnrollRequest) -> dict:
         raise HTTPException(status_code=400, detail="invalid certificate PEM")
     if not crypto_service.issued_by_ra(cert):
         raise HTTPException(status_code=403, detail="certificate not issued by the RA")
+    if not crypto_service.within_validity(cert):
+        raise HTTPException(status_code=403, detail="certificate expired or not yet valid")
     try:
         if revocation.is_revoked(cert):
             raise HTTPException(status_code=403, detail="certificate revoked")

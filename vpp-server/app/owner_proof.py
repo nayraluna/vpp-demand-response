@@ -41,6 +41,8 @@ def verify(jws_token: str, authenticated_user: str) -> dict:
     # (1) the appliance certificate must have been issued by the RA
     if not crypto_service.issued_by_ra(ven_cert):
         raise InvalidOwnerProof("appliance certificate not issued by the RA")
+    if not crypto_service.within_validity(ven_cert):
+        raise InvalidOwnerProof("appliance certificate expired or not yet valid")
 
     # (2) the signature must verify with the certified public key
     ven_pub = ven_cert.public_key().public_bytes(

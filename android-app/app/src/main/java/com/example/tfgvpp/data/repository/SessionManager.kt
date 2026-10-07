@@ -89,7 +89,7 @@ class SessionManager @Inject constructor(
     }
 
     private fun chainsToRa(cert: X509Certificate): Boolean =
-        try { cert.verify(ca.certificate.publicKey); true } catch (e: Exception) { false }
+        try { cert.verify(ca.certificate.publicKey); cert.checkValidity(); true } catch (e: Exception) { false }
 }
 
 /** [User] as the presentation layer sees the active session. */
