@@ -27,7 +27,7 @@ _ca_public_pem: bytes | None = None
 
 
 class Unavailable(Exception):
-    """No list has ever been obtained, so revocation status cannot be decided."""
+    """No current list is held, so revocation status cannot be decided."""
 
 
 def _anchor() -> bytes:
@@ -64,12 +64,22 @@ def _discard_relay_copy_if_foreign() -> None:
         db.clear_crl()
 
 
+def _expired(crl: dict) -> bool:
+    try:
+        until = datetime.datetime.fromisoformat(crl["next_update"])
+    except Exception:
+        return True
+    return datetime.datetime.now(datetime.timezone.utc) > until
+
+
 def current() -> dict:
     """The verified list, refreshed once the cached copy is older than MAX_AGE.
 
     A refresh that fails keeps the last good copy, because a stale list is
-    still a signed statement by the CA. Only when no list was ever obtained
-    does this refuse to answer, and callers then fail closed."""
+    still a signed statement by the CA, but only for as long as the CA said
+    it would stand. Past its next_update, or when no list was ever obtained,
+    this refuses to answer and callers fail closed, the same rule the
+    appliance applies to its own copy."""
     global _crl, _fetched_at
     with _lock:
         if _crl is None:
@@ -89,6 +99,9 @@ def current() -> dict:
                 if _crl is None:
                     raise Unavailable("revocation list could not be fetched from the CA")
             _fetched_at = time.monotonic()
+        if _expired(_crl):
+            raise Unavailable(f"revocation list expired at {_crl.get('next_update')}"
+                              " and the CA has not published a fresh one")
         return _crl
 
 

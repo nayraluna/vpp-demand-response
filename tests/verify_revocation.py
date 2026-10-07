@@ -326,6 +326,25 @@ def main():
         with sqlite3.connect(str(DB_FILE)) as c:
             c.execute("DELETE FROM activations WHERE activation_id IN (?, ?)", (act_a, act_b))
 
+        print("G13: with the CA unreachable, the VPP serves its copy only until next_update")
+        # The VPP's own verifier, loaded in this process and pointed at a port
+        # nobody listens on, holding the list it would have cached.
+        sys.path.insert(0, str(ROOT / "vpp-server"))
+        from app import revocation  # noqa: E402
+        revocation.CA_URL, revocation.MAX_AGE = "https://127.0.0.1:1", 0
+        held = {"crl_number": 1, "revoked": [], "next_update": (
+            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).isoformat()}
+        revocation._crl = dict(held)
+        ok("a list still within next_update is served while the CA is down") \
+            if revocation.current()["crl_number"] == 1 \
+            else die("cached list not served")
+        revocation._crl = {**held, "next_update": (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=1)).isoformat()}
+        try:
+            revocation.current()
+            die("an expired list was served while the CA is down")
+        except revocation.Unavailable as e:
+            ok(f"past next_update the VPP refuses to decide: {e}")
+
         print(f"\nREVOCATION COMPLETE: {passed} checks passed.")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

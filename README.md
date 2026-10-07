@@ -59,7 +59,7 @@ The user's half of that never leaves the phone. The key is generated inside the 
 powershell -ExecutionPolicy Bypass -File .\run_all.ps1
 ```
 
-The suite runs 16 gates and 181 checks. Every protocol step is exercised against its positive *and* its negative cases over the real stack, with real TLS and a real database: certificates outside the CA chain, invalid signatures, replayed activations, forged capacities, evidence submitted twice, revoked credentials at the mutual-TLS door, a rolled-back revocation list. The database is used as an attack vector too, planting a rolled-back calendar and one signed by a forged issuer directly into the row the appliance polls, to show the device refuses them on its own.
+The suite runs 16 gates and 183 checks. Every protocol step is exercised against its positive *and* its negative cases over the real stack, with real TLS and a real database: certificates outside the CA chain, invalid signatures, replayed activations, forged capacities, evidence submitted twice, revoked credentials at the mutual-TLS door, a rolled-back revocation list. The database is used as an attack vector too, planting a rolled-back calendar and one signed by a forged issuer directly into the row the appliance polls, to show the device refuses them on its own.
 
 The Android client is covered too. `RegistrationFlowTest` drives the real protocol clients against the live local servers from the JVM, which is why those clients import nothing from Android.
 
@@ -67,7 +67,7 @@ The Android client is covered too. `RegistrationFlowTest` drives the real protoc
 
 ## What this prototype does not do
 
-- **Revocation is a signed list, not OCSP.** The list is a JWS under the root key rather than an RFC 5280 CRL, the certificates carry no distribution point, and the VPP keeps its last copy past `next_update` when the CA is unreachable. The DNIe's own revocation status is not checked.
+- **Revocation is a signed list, not OCSP.** The list is a JWS under the root key rather than an RFC 5280 CRL, the certificates carry no distribution point, and there is no OCSP. The DNIe's own revocation status is not checked.
 - **Issuance-side validation is missing.** The CA verifies possession of the key but not the identity behind it, nor the operator role attribute. Both checks belong in the RA role and currently rest on the requesting side.
 - **The HSM is emulated and the curtailment is simulated.** A signature proves the appliance produced the evidence, not that power flowed differently. Real metering behind the same signing boundary is the natural next step.
 - **Stored evidence is verified once, at submission.** No later path compares a participation row against the signature stored beside it, and the reward is computed from the row's own columns. A `reduction_pct` edited in the database would change a payout without invalidating anything. The availability path is the opposite: the appliance re-verifies the calendar on every poll, which is why a rolled-back row planted directly in the table is refused.
