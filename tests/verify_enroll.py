@@ -71,10 +71,12 @@ def self_signed(cn: str) -> str:
     return cert.public_bytes(serialization.Encoding.PEM).decode()
 
 
-def expired_from_ca(cn: str):
-    """A certificate the CA really signed, whose validity ended yesterday. The
-    CA key is read here only to mint this fixture: the gate is about the
-    verifier, which must not accept a genuine signature past its date."""
+def signed_by_ca(cn: str, days_ago: int = 0):
+    """A certificate the CA really signed, outside its register. The CA key is
+    read here only to mint fixtures the CA itself would refuse to issue: one
+    whose validity ended `days_ago` days ago, or a second one for a name that
+    already has a live certificate. The gates are about the VPP's verifier,
+    which must not lean on the CA's policy alone."""
     ca = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
     ca_key = serialization.load_pem_private_key((Path(CA_FILE).parent / "CA.key").read_bytes(), None)
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -85,8 +87,8 @@ def expired_from_ca(cn: str):
         .issuer_name(ca.subject)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(now - datetime.timedelta(days=2))
-        .not_valid_after(now - datetime.timedelta(days=1))
+        .not_valid_before(now - datetime.timedelta(days=days_ago + 1))
+        .not_valid_after(now + datetime.timedelta(days=1 - days_ago))
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .sign(ca_key, hashes.SHA256())
     )
@@ -125,11 +127,18 @@ def main():
         if r3.status_code == 403 else die(f"expected 403, got {r3.status_code}")
 
     print("G5: a genuine but expired certificate is rejected")
-    _k, expired = expired_from_ca(f"expired-{secrets.token_hex(3)}")
+    _k, expired = signed_by_ca(f"expired-{secrets.token_hex(3)}", days_ago=2)
     r4 = requests.post(f"{VPP}/enroll", json={"certificate": expired}, verify=CA_FILE)
     ok(f"expired certificate rejected (403): {r4.json().get('detail', '')}") \
         if r4.status_code == 403 and "expired" in r4.text \
         else die(f"expected 403 expired, got {r4.status_code} {r4.text}")
+
+    print("G6: a different certificate cannot take over an enrolled account")
+    _k, twin = signed_by_ca(cn)
+    r5 = requests.post(f"{VPP}/enroll", json={"certificate": twin}, verify=CA_FILE)
+    ok(f"second live certificate for {cn} refused (409): {r5.json().get('detail', '')}") \
+        if r5.status_code == 409 \
+        else die(f"expected 409 on account takeover, got {r5.status_code} {r5.text}")
 
     print(f"\nUSER ENROLLMENT COMPLETE: {passed} checks passed.")
 

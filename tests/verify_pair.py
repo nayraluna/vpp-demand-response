@@ -91,8 +91,9 @@ def fake_platform():
 
 def expired_from_ca(cn: str):
     """A certificate the CA really signed, whose validity ended yesterday. The
-    CA key is read here only to mint this fixture: the gate is about the
-    verifier, which must not accept a genuine signature past its date."""
+    CA key is read here only to mint this fixture, which the CA itself would
+    never issue: the gate is about the appliance's verifier, which must not
+    accept a genuine signature past its date."""
     ca = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
     ca_key = serialization.load_pem_private_key((Path(CA_FILE).parent / "CA.key").read_bytes(), None)
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)

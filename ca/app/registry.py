@@ -51,6 +51,18 @@ def serial_for_key(key_id: str) -> str | None:
     return row[0] if row else None
 
 
+def live_serial_for_subject(subject: str, now: datetime.datetime) -> str | None:
+    """The serial of this subject's current certificate: issued here, not
+    revoked and not yet expired. None if the subject holds no live one."""
+    with _conn() as c:
+        row = c.execute(
+            "SELECT serial FROM issued WHERE subject=? AND revoked_at IS NULL"
+            " AND not_after > ? ORDER BY issued_at DESC LIMIT 1",
+            (subject, now.isoformat()),
+        ).fetchone()
+    return row[0] if row else None
+
+
 def lookup(serial: str) -> dict | None:
     with _conn() as c:
         row = c.execute(

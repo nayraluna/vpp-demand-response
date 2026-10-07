@@ -8,7 +8,7 @@ import jwt
 import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -23,9 +23,18 @@ CRT_FILE = Path(__file__).resolve().parent / "operator.crt"
 
 def init_credential(force: bool = False) -> tuple[str, str]:
     """Issue (or reuse) the operator credential: an RA certificate whose subject
-    carries OU=role=operator. The private key never leaves this machine."""
-    if KEY_FILE.exists() and CRT_FILE.exists() and not force:
+    carries OU=role=operator. The private key never leaves this machine.
+
+    With `force` and a credential already on disk this is a renewal: the
+    current credential signs the request for the new key and is superseded.
+    The CA issues one live certificate per subject, so a plain re-issue
+    would be refused while the old one still stands. A credential from a
+    root that is no longer the CA's cannot renew anything and is replaced."""
+    have = KEY_FILE.exists() and CRT_FILE.exists()
+    if have and not force:
         return str(CRT_FILE), str(KEY_FILE)
+    renew = have and _chains_to_current_root(
+        x509.load_pem_x509_certificate(CRT_FILE.read_bytes()))
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     csr = (x509.CertificateSigningRequestBuilder()
@@ -34,10 +43,15 @@ def init_credential(force: bool = False) -> tuple[str, str]:
                x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "role=operator"),
            ]))
            .sign(key, hashes.SHA256()))
-    r = requests.post(f"{CA}/ra/issue",
-                      json={"csr": csr.public_bytes(serialization.Encoding.PEM).decode()},
-                      verify=CA_FILE)
-    r.raise_for_status()
+    csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode()
+    if renew:
+        token = _sign_as_operator({"csr": csr_pem}, "application/renewal-request+json")
+        r = requests.post(f"{CA}/ra/renew", json={"request": token}, verify=CA_FILE)
+    else:
+        r = requests.post(f"{CA}/ra/issue", json={"csr": csr_pem}, verify=CA_FILE)
+    if r.status_code != 200:
+        raise SystemExit(f"operator credential refused: HTTP {r.status_code} "
+                         f"{r.json().get('detail', r.text)}")
     CRT_FILE.write_text(r.json()["certificate"])
     KEY_FILE.write_bytes(key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
@@ -49,6 +63,16 @@ def _hour_to_slot(text: str) -> int:
     """"18" or "18:30" -> slot index (30-minute slots)."""
     hour, _, minute = text.partition(":")
     return av.slot_index(int(hour), int(minute or 0))
+
+
+def _chains_to_current_root(cert: x509.Certificate) -> bool:
+    root = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
+    try:
+        root.public_key().verify(cert.signature, cert.tbs_certificate_bytes,
+                                 padding.PKCS1v15(), cert.signature_hash_algorithm)
+        return True
+    except Exception:
+        return False
 
 
 def _sign_as_operator(payload: dict, typ: str) -> str:

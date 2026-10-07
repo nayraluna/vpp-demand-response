@@ -1,3 +1,4 @@
+import secrets
 import sys
 from pathlib import Path
 
@@ -48,18 +49,20 @@ def main():
     ca = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
 
     # --- the entity generates its OWN key and a CSR (key never leaves here) ---
+    cn = f"ven-{secrets.token_hex(3)}"
+    subject = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, cn),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Appliances"),
+        x509.NameAttribute(NameOID.COUNTRY_NAME, "ES"),
+    ])
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     csr = (
         x509.CertificateSigningRequestBuilder()
-        .subject_name(x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, "ven-0007"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Appliances"),
-            x509.NameAttribute(NameOID.COUNTRY_NAME, "ES"),
-        ]))
+        .subject_name(subject)
         .sign(key, hashes.SHA256())
     )
     csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode()
-    print("Entity generated a local key pair and a CSR (CN=ven-0007)\n")
+    print(f"Entity generated a local key pair and a CSR (CN={cn})\n")
 
     print("G1: RA issues a certificate from the CSR")
     r = requests.post(f"{MAN}/ra/issue", json={"csr": csr_pem}, verify=CA_FILE)
@@ -89,7 +92,7 @@ def main():
         else die("EKU wrong")
 
     print("G3: the issued certificate really certifies the entity's key")
-    msg = b"ven-0007|proof-of-possession"
+    msg = f"{cn}|proof-of-possession".encode()
     sig = key.sign(msg, padding.PKCS1v15(), hashes.SHA256())
     try:
         cert.public_key().verify(sig, msg, padding.PKCS1v15(), hashes.SHA256())
@@ -104,6 +107,17 @@ def main():
     r = requests.post(f"{MAN}/ra/issue", json={"csr": "-----not a csr-----"}, verify=CA_FILE)
     ok("malformed CSR rejected (400)") if r.status_code == 400 \
         else die(f"expected 400 on bad CSR, got {r.status_code}")
+    # A new key asking for a name that already has a live certificate. The
+    # CSR is well formed and proves possession, and that is not enough.
+    intruder = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    same_name = (x509.CertificateSigningRequestBuilder().subject_name(subject)
+                 .sign(intruder, hashes.SHA256()))
+    r = requests.post(f"{MAN}/ra/issue",
+                      json={"csr": same_name.public_bytes(serialization.Encoding.PEM).decode()},
+                      verify=CA_FILE)
+    ok(f"a second live certificate for the same subject refused (409): {r.json().get('detail', '')[:60]}") \
+        if r.status_code == 409 and "subject" in r.text \
+        else die(f"expected 409 on subject collision, got {r.status_code} {r.text}")
 
     print(f"\nCERTIFICATE ISSUANCE COMPLETE: {passed} checks passed.")
 

@@ -25,12 +25,15 @@ def main() -> None:
     ap.add_argument("--profile", choices=sorted(ra_service.PROFILES), default="client")
     ap.add_argument("--san", default="", help="comma separated, TLS server profiles only")
     ap.add_argument("--days", type=int, default=365)
+    ap.add_argument("--supersedes", metavar="SERIAL",
+                    help="renewal: the serial this certificate replaces, revoked as superseded")
     args = ap.parse_args()
 
     ra_service.initialize()
     san = [s.strip() for s in args.san.split(",") if s.strip()] or None
     issued = ra_service.issue_from_csr(args.csr.read_text(encoding="utf-8"),
-                                       days=args.days, profile=args.profile, san=san)
+                                       days=args.days, profile=args.profile, san=san,
+                                       supersedes=args.supersedes)
     args.out.write_text(issued["certificate"])
     print(f"signed {issued['subject']} as {args.profile}, serial {issued['serial'][:12]}..., "
           f"until {issued['not_after'][:10]} -> {args.out}")

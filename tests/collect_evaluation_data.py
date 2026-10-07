@@ -3,6 +3,7 @@ import datetime
 import json
 import math
 import re
+import secrets
 import sqlite3
 import statistics
 import subprocess
@@ -148,7 +149,10 @@ def slot_hhmm(s):
 def main():
     print("== phase 0: reset + identities ==")
     reset_operational_state()
-    key, cert_pem, client = ra_identity("eval-user-01")
+    # Names carry a run tag: the CA issues one live certificate per subject,
+    # so a second run must not ask for the names the first one still holds.
+    run = secrets.token_hex(2)
+    key, cert_pem, client = ra_identity(f"eval-user-{run}")
 
     print(f"== phase 0b: issuance and enrolment, {SAMPLES} samples ==")
     issue_ms, enroll_ms = [], []
@@ -156,7 +160,7 @@ def main():
         throwaway = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         csr = (x509.CertificateSigningRequestBuilder()
                .subject_name(x509.Name([x509.NameAttribute(
-                   NameOID.COMMON_NAME, f"eval-perf-{i:02d}")]))
+                   NameOID.COMMON_NAME, f"eval-perf-{run}-{i:02d}")]))
                .sign(throwaway, hashes.SHA256()))
         (r, ms) = timed(lambda: requests.post(
             f"{MAN}/ra/issue",

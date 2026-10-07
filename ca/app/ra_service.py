@@ -92,8 +92,12 @@ def _san(names: list[str]) -> x509.SubjectAlternativeName:
 
 
 def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
-                   san: list[str] | None = None) -> dict:
-    """Verify a CSR and issue a CA-signed leaf certificate for a platform identity."""
+                   san: list[str] | None = None, supersedes: str | None = None) -> dict:
+    """Verify a CSR and issue a CA-signed leaf certificate for a platform identity.
+
+    `supersedes` names the serial this certificate replaces: a renewal. It is
+    revoked as superseded in the same act, so the subject never holds two
+    live certificates."""
     if profile not in PROFILES:
         raise InvalidCSR(f"unknown certificate profile {profile!r}")
     if san and not profile.startswith("tls-server"):
@@ -115,8 +119,16 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
     if already:
         raise AlreadyEnrolled(f"public key already enrolled (serial {already})")
 
-    serial = x509.random_serial_number()
+    # One live certificate per subject. Possession of a key proves nothing
+    # about the name in the CSR, so without this a fresh key could be
+    # certified under an existing identity and step into its account at the
+    # VPP. Only the certificate a renewal says it replaces may be live here.
     now = datetime.datetime.now(datetime.timezone.utc)
+    live = registry.live_serial_for_subject(csr.subject.rfc4514_string(), now)
+    if live and live != supersedes:
+        raise AlreadyEnrolled(f"subject already holds a live certificate (serial {live})")
+
+    serial = x509.random_serial_number()
     not_after = now + datetime.timedelta(days=days)
 
     # Extensions are set by the CA from the profile, NOT copied from the CSR:
@@ -152,6 +164,8 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
 
     serial_hex = format(serial, "x")
     registry.record(serial_hex, key_id, cert.subject.rfc4514_string(), now, not_after)
+    if supersedes:
+        registry.revoke(supersedes, "superseded")
     return {
         "certificate": cert.public_bytes(serialization.Encoding.PEM).decode(),
         "subject": cert.subject.rfc4514_string(),
@@ -236,9 +250,8 @@ def renew_from_request(token: str) -> dict:
     if spki(csr.public_key()) == spki(signer.public_key()):
         raise AlreadyEnrolled("renewal must use a new key pair")
 
-    issued = issue_from_csr(csr_pem)
     old_serial = format(signer.serial_number, "x")
-    registry.revoke(old_serial, "superseded")
+    issued = issue_from_csr(csr_pem, supersedes=old_serial)
     return {**issued, "superseded": old_serial, "crl_number": registry.crl_number()}
 
 

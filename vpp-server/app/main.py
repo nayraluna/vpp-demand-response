@@ -52,7 +52,19 @@ def enroll(req: EnrollRequest) -> dict:
         raise HTTPException(status_code=503, detail=str(e))
 
     subject = cert.subject.rfc4514_string()
-    already = db.get_user(subject) is not None
+    existing = db.get_user(subject)
+    already = existing is not None
+    if already and existing["cert_pem"] != req.certificate:
+        # The account belongs to the certificate it was enrolled with. A
+        # different one may take it over only once the CA has withdrawn the
+        # old one (a renewal supersedes it) or it has expired on its own.
+        old = x509.load_pem_x509_certificate(existing["cert_pem"].encode())
+        try:
+            if crypto_service.within_validity(old) and not revocation.is_revoked(old):
+                raise HTTPException(status_code=409,
+                                    detail="subject already enrolled with a different live certificate")
+        except revocation.Unavailable as e:
+            raise HTTPException(status_code=503, detail=str(e))
     db.add_user(subject, req.certificate,
                 datetime.datetime.now(datetime.timezone.utc).isoformat())
     return {
