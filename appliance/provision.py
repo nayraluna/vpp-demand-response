@@ -56,7 +56,7 @@ def main() -> None:
     r = sub.add_parser("request")
     r.add_argument("--ven", default="ven-0001")
     r.add_argument("--power", type=int, default=2000, help="nominal power in W")
-    r.add_argument("--algo", choices=("rsa", "ec"), default="rsa")
+    r.add_argument("--algo", choices=("rsa", "ec"), default="ec")
     i = sub.add_parser("install")
     i.add_argument("cert", type=Path)
     i.add_argument("root", type=Path)

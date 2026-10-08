@@ -25,6 +25,7 @@ import java.io.StringWriter
 import java.net.Socket
 import java.security.KeyPair
 import java.security.KeyPairGenerator
+import java.security.spec.ECGenParameterSpec
 import java.security.KeyStore
 import java.security.Principal
 import java.security.PrivateKey
@@ -169,9 +170,9 @@ class RegistrationClient(caInput: InputStream) {
                 .build()
         }
 
-        /** 2048-bit RSA software key, matching the platform PKI (JVM tests). */
+        /** P-256 software key, matching the platform PKI (JVM tests). */
         fun softwareKeyPair(): KeyPair =
-            KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
+            KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
 
         /** Compact JWS with the certificate in x5c; ES256 for EC keys, RS256 for RSA, the platform accepts both. */
         fun signedJws(credential: UserCredential, claims: Map<String, Any>): String {

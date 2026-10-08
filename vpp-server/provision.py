@@ -44,7 +44,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("request")
-    r.add_argument("--algo", choices=("rsa", "ec"), default="rsa")
+    r.add_argument("--algo", choices=("rsa", "ec"), default="ec")
     i = sub.add_parser("install")
     i.add_argument("cert", type=Path)
     args = ap.parse_args()

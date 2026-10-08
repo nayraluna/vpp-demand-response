@@ -27,6 +27,7 @@ import org.junit.Test
 import java.io.File
 import java.net.Socket
 import java.security.KeyPairGenerator
+import java.security.spec.ECGenParameterSpec
 import java.security.SecureRandom
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
@@ -271,15 +272,15 @@ class RegistrationFlowTest {
 
     /** RA-issued OU=role=operator credential; fresh name because the CA issues one live certificate per subject. */
     private fun operatorCredential(ca: X509Certificate): RegistrationClient.UserCredential {
-        val keyPair = KeyPairGenerator.getInstance("RSA")
-            .apply { initialize(2048) }.generateKeyPair()
+        val keyPair = KeyPairGenerator.getInstance("EC")
+            .apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
         val tag = ByteArray(3).let { SecureRandom().nextBytes(it); it.joinToString("") { b -> "%02x".format(b) } }
         val subject = X500NameBuilder(BCStyle.INSTANCE)
             .addRDN(BCStyle.CN, "test-operator-$tag")
             .addRDN(BCStyle.OU, "role=operator")
             .build()
         val csr = JcaPKCS10CertificationRequestBuilder(subject, keyPair.public)
-            .build(JcaContentSignerBuilder("SHA256withRSA").build(keyPair.private))
+            .build(JcaContentSignerBuilder("SHA256withECDSA").build(keyPair.private))
         val issued = postJson(
             RegistrationClient.buildServerAuthClient(ca), "$raUrl/ra/issue",
             mapOf("csr" to RegistrationClient.toPem("CERTIFICATE REQUEST", csr.encoded)),

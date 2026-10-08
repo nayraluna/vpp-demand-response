@@ -45,7 +45,7 @@ def write_key(path: Path, key) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--algo", choices=("rsa", "ec"), default="rsa")
+    ap.add_argument("--algo", choices=("rsa", "ec"), default="ec")
     ap.add_argument("--san", default="", help="extra addresses for the CA's TLS certificate")
     ap.add_argument("--days", type=int, default=730)
     args = ap.parse_args()
