@@ -175,7 +175,7 @@ def main():
     ven_cert = x509.load_der_x509_certificate(base64.b64decode(header["x5c"][0]))
     ven_pub = ven_cert.public_key().public_bytes(
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
-    payload = jwt.decode(proof, ven_pub, algorithms=["RS256"])
+    payload = jwt.decode(proof, ven_pub, algorithms=["RS256", "ES256"])
     ok(f"owner proof binds {payload['ven']} to {payload['owner']}") \
         if payload["owner"] == body["owner"] else die("proof names a different owner")
     ok(f"declared power P={payload['P']} matches the certificate (OU=P=...)") \

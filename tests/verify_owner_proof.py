@@ -10,7 +10,7 @@ import jwt
 import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -83,10 +83,11 @@ def forged_proof(owner_subject: str, power: int) -> str:
     key_pem = key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption())
+    alg = "ES256" if isinstance(key, ec.EllipticCurvePrivateKey) else "RS256"
     return jwt.encode({
         "ven": cert.subject.rfc4514_string(), "owner": owner_subject,
         "P": power, "max": 120, "rec": 30,
-    }, key_pem, algorithm="RS256",
+    }, key_pem, algorithm=alg,
         headers={"x5c": [x5c], "typ": "application/owner-proof+json"})
 
 

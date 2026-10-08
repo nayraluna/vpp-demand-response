@@ -6,7 +6,6 @@ from pathlib import Path
 import jwt  # PyJWT
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import padding
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import hsm  # noqa: E402
@@ -24,10 +23,7 @@ class AlreadyPaired(Exception):
 
 def _issued_by(cert: x509.Certificate, issuer: x509.Certificate) -> bool:
     try:
-        issuer.public_key().verify(
-            cert.signature, cert.tbs_certificate_bytes,
-            padding.PKCS1v15(), cert.signature_hash_algorithm,
-        )
+        cert.verify_directly_issued_by(issuer)
         return True
     except Exception:
         # Fail closed: any verification error means "not issued by this issuer".

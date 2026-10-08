@@ -173,7 +173,7 @@ def main():
         ven_cert = x509.load_der_x509_certificate(base64.b64decode(hdr["x5c"][0]))
         pub = ven_cert.public_key().public_bytes(
             serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
-        payload = jwt.decode(row[2], pub, algorithms=["RS256"])
+        payload = jwt.decode(row[2], pub, algorithms=["RS256", "ES256"])
         ok(f"re-verifies from storage: activation {payload['activation_id']}, "
            f"{payload['date']} {payload['time']}") \
             if payload["activation_id"] == act_id else die("stored evidence mismatch")

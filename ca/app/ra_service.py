@@ -7,7 +7,7 @@ import ipaddress
 import jwt
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import NameOID
 
 from . import registry
@@ -129,7 +129,9 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
         .add_extension(
             x509.KeyUsage(
                 digital_signature=True, content_commitment=False,
-                key_encipherment=rules["key_encipherment"], data_encipherment=False,
+                # Key transport is an RSA notion; an EC key never enciphers.
+                key_encipherment=rules["key_encipherment"] and isinstance(public_key, rsa.RSAPublicKey),
+                data_encipherment=False,
                 key_agreement=False, key_cert_sign=False, crl_sign=False,
                 encipher_only=False, decipher_only=False,
             ),
@@ -160,10 +162,7 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
 
 def _issued_here(cert: x509.Certificate) -> bool:
     try:
-        _ca_cert.public_key().verify(
-            cert.signature, cert.tbs_certificate_bytes,
-            padding.PKCS1v15(), cert.signature_hash_algorithm,
-        )
+        cert.verify_directly_issued_by(_ca_cert)
         return True
     except Exception:
         return False
@@ -242,5 +241,6 @@ def crl_jws() -> str:
     key_pem = _ca_key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption())
-    return jwt.encode(payload, key_pem, algorithm="RS256",
+    alg = "ES256" if isinstance(_ca_key, ec.EllipticCurvePrivateKey) else "RS256"
+    return jwt.encode(payload, key_pem, algorithm=alg,
                       headers={"typ": "application/crl+json"})

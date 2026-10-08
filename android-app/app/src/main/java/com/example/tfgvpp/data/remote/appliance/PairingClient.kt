@@ -2,6 +2,7 @@ package com.example.tfgvpp.data.remote.appliance
 
 import com.example.tfgvpp.data.remote.vpp.RegistrationClient
 import com.nimbusds.jose.JWSObject
+import com.nimbusds.jose.crypto.ECDSAVerifier
 import com.nimbusds.jose.crypto.RSASSAVerifier
 import com.nimbusds.jose.util.JSONObjectUtils
 import org.bouncycastle.asn1.ASN1String
@@ -14,6 +15,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.InputStream
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
+import java.security.interfaces.ECPublicKey
 import java.security.interfaces.RSAPublicKey
 import javax.security.auth.x500.X500Principal
 
@@ -92,8 +94,11 @@ class PairingClient(caInput: InputStream, private val registration: Registration
             jws.header.x509CertChain.first().decode().inputStream()
         ) as X509Certificate
 
-        val signatureValid = (venCert.publicKey as? RSAPublicKey)
-            ?.let { jws.verify(RSASSAVerifier(it)) } ?: false
+        val signatureValid = when (val key = venCert.publicKey) {
+            is RSAPublicKey -> jws.verify(RSASSAVerifier(key))
+            is ECPublicKey -> jws.verify(ECDSAVerifier(key))
+            else -> false
+        }
         val chainsToRa =
             try { venCert.verify(caCertificate.publicKey); venCert.checkValidity(); true } catch (e: Exception) { false }
 

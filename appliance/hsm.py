@@ -70,8 +70,6 @@ def sign(message: str) -> str:
 
 def sign_jws(payload: dict, typ: str = "application/owner-proof+json") -> str:
     """Compact JWS signed in the HSM, VEN certificate in x5c so the VPP can chain it to the CA."""
-    if not isinstance(_private_key, rsa.RSAPrivateKey):
-        raise RuntimeError("sign_jws currently supports RS256 (RSA) only")
     key_pem = _private_key.private_bytes(
         serialization.Encoding.PEM,
         serialization.PrivateFormat.PKCS8,
@@ -80,5 +78,6 @@ def sign_jws(payload: dict, typ: str = "application/owner-proof+json") -> str:
     x5c = base64.b64encode(
         _certificate.public_bytes(serialization.Encoding.DER)
     ).decode()
-    return jwt.encode(payload, key_pem, algorithm="RS256",
+    alg = "ES256" if isinstance(_private_key, ec.EllipticCurvePrivateKey) else "RS256"
+    return jwt.encode(payload, key_pem, algorithm=alg,
                       headers={"typ": typ, "x5c": [x5c]})

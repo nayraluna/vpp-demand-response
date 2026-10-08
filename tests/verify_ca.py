@@ -29,12 +29,9 @@ def die(msg):
 
 def chains_to_ca(cert, ca) -> bool:
     try:
-        ca.public_key().verify(
-            cert.signature, cert.tbs_certificate_bytes,
-            padding.PKCS1v15(), cert.signature_hash_algorithm,
-        )
+        cert.verify_directly_issued_by(ca)
         return True
-    except InvalidSignature:
+    except Exception:
         return False
 
 

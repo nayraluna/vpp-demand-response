@@ -8,7 +8,7 @@ import jwt
 import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -61,8 +61,7 @@ def _hour_to_slot(text: str) -> int:
 def _chains_to_current_root(cert: x509.Certificate) -> bool:
     root = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
     try:
-        root.public_key().verify(cert.signature, cert.tbs_certificate_bytes,
-                                 padding.PKCS1v15(), cert.signature_hash_algorithm)
+        cert.verify_directly_issued_by(root)
         return True
     except Exception:
         return False
@@ -73,7 +72,9 @@ def _sign_as_operator(payload: dict, typ: str) -> str:
     crt, key = init_credential()
     cert = x509.load_pem_x509_certificate(Path(crt).read_bytes())
     x5c = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode()
-    return jwt.encode(payload, Path(key).read_bytes(), algorithm="RS256",
+    private = serialization.load_pem_private_key(Path(key).read_bytes(), password=None)
+    alg = "ES256" if isinstance(private, ec.EllipticCurvePrivateKey) else "RS256"
+    return jwt.encode(payload, private, algorithm=alg,
                       headers={"x5c": [x5c], "typ": typ})
 
 
@@ -93,7 +94,7 @@ def show_crl() -> None:
     anchor = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes()).public_key()
     crl = jwt.decode(r.json()["crl"], anchor.public_bytes(
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo),
-        algorithms=["RS256"])
+        algorithms=["RS256", "ES256"])
     print(f"CRL #{crl['crl_number']} from {crl['issuer']}")
     print(f"  this_update {crl['this_update']}")
     print(f"  next_update {crl['next_update']}")

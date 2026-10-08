@@ -6,7 +6,7 @@ import requests
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import ec, padding
 
 ROOT = Path(__file__).resolve().parent.parent
 CERTS = ROOT / "certs"
@@ -40,16 +40,19 @@ def die(msg):
     sys.exit(1)
 
 
+def raw_verify(pub, sig, msg):
+    """Detached signature check for whichever key type the certificate carries."""
+    if isinstance(pub, ec.EllipticCurvePublicKey):
+        pub.verify(sig, msg, ec.ECDSA(hashes.SHA256()))
+    else:
+        pub.verify(sig, msg, padding.PKCS1v15(), hashes.SHA256())
+
+
 def chains_to_ca(cert: x509.Certificate, ca: x509.Certificate) -> bool:
     try:
-        ca.public_key().verify(
-            cert.signature,
-            cert.tbs_certificate_bytes,
-            padding.PKCS1v15(),
-            cert.signature_hash_algorithm,
-        )
+        cert.verify_directly_issued_by(ca)
         return True
-    except InvalidSignature:
+    except Exception:
         return False
 
 
@@ -81,12 +84,12 @@ def main():
         die("VPP signing certificate not issued by our CA")
     sig = bytes.fromhex(vpp_crypto.sign("hello world"))
     try:
-        vpp_cert.public_key().verify(sig, b"hello world", padding.PKCS1v15(), hashes.SHA256())
+        raw_verify(vpp_cert.public_key(), sig, b"hello world")
         ok("VPP signature over 'hello world' verifies")
     except InvalidSignature:
         die("VPP signature did not verify")
     try:
-        vpp_cert.public_key().verify(sig, b"hello worle", padding.PKCS1v15(), hashes.SHA256())
+        raw_verify(vpp_cert.public_key(), sig, b"hello worle")
         die("tampered message verified (broken logic)")
     except InvalidSignature:
         ok("tampered message rejected")
@@ -112,12 +115,12 @@ def main():
     msg = "ven-0001|hello world"
     sig = bytes.fromhex(hsm.sign(msg))
     try:
-        ven_cert.public_key().verify(sig, msg.encode(), padding.PKCS1v15(), hashes.SHA256())
+        raw_verify(ven_cert.public_key(), sig, msg.encode())
         ok("VEN signature verifies with certified public key")
     except InvalidSignature:
         die("VEN signature did not verify")
     try:
-        ven_cert.public_key().verify(sig, b"ven-0001|hello w0rld", padding.PKCS1v15(), hashes.SHA256())
+        raw_verify(ven_cert.public_key(), sig, b"ven-0001|hello w0rld")
         die("tampered VEN message verified (broken logic)")
     except InvalidSignature:
         ok("tampered VEN message rejected")

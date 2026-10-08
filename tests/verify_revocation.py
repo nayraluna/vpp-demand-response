@@ -104,7 +104,7 @@ def fetch_crl() -> tuple[str, dict]:
     r = requests.get(f"{CA}/ra/crl", verify=CA_FILE)
     r.raise_for_status()
     token = r.json()["crl"]
-    return token, jwt.decode(token, anchor_pem(), algorithms=["RS256"])
+    return token, jwt.decode(token, anchor_pem(), algorithms=["RS256", "ES256"])
 
 
 def listed(payload: dict, serial: str) -> bool:
@@ -241,7 +241,7 @@ def main():
         head, payload, sig = token.split(".")
         forged = payload[:-2] + ("A" if payload[-2] != "A" else "B") + payload[-1]
         try:
-            jwt.decode(".".join([head, forged, sig]), anchor_pem(), algorithms=["RS256"])
+            jwt.decode(".".join([head, forged, sig]), anchor_pem(), algorithms=["RS256", "ES256"])
             die("a tampered CRL verified")
         except jwt.InvalidTokenError as e:
             ok(f"a tampered CRL fails verification ({type(e).__name__})")

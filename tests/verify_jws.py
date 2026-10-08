@@ -35,12 +35,9 @@ def b64url(obj) -> str:
 
 def chains_to_ca(cert, ca) -> bool:
     try:
-        ca.public_key().verify(
-            cert.signature, cert.tbs_certificate_bytes,
-            padding.PKCS1v15(), cert.signature_hash_algorithm,
-        )
+        cert.verify_directly_issued_by(ca)
         return True
-    except InvalidSignature:
+    except Exception:
         return False
 
 
@@ -52,7 +49,7 @@ def main():
     print(f"JWS produced by the VPP:\n  {token[:56]}...{token[-16:]}\n")
 
     header = jwt.get_unverified_header(token)
-    ok(f"header alg = {header['alg']}") if header.get("alg") == "RS256" \
+    ok(f"header alg = {header['alg']}") if header.get("alg") in ("RS256", "ES256") \
         else die(f"unexpected alg: {header.get('alg')}")
     ok("header carries x5c (the VPP certificate)") if "x5c" in header \
         else die("no x5c header")
@@ -69,7 +66,7 @@ def main():
         serialization.PublicFormat.SubjectPublicKeyInfo,
     )
 
-    payload = jwt.decode(token, pub_pem, algorithms=["RS256"])
+    payload = jwt.decode(token, pub_pem, algorithms=["RS256", "ES256"])
     if payload.get("message") == "hello world":
         ok(f"signature verifies, payload recovered: {payload}")
     else:
@@ -78,7 +75,7 @@ def main():
     h, p, s = token.split(".")
     s_bad = ("A" if s[0] != "A" else "B") + s[1:]
     try:
-        jwt.decode(f"{h}.{p}.{s_bad}", pub_pem, algorithms=["RS256"])
+        jwt.decode(f"{h}.{p}.{s_bad}", pub_pem, algorithms=["RS256", "ES256"])
         die("tampered token verified (broken)")
     except Exception:
         ok("tampered token rejected")
@@ -86,7 +83,7 @@ def main():
     forged = b64url({"alg": "none", "typ": "JWT"}) + "." \
         + b64url({"message": "hello world"}) + "."
     try:
-        jwt.decode(forged, pub_pem, algorithms=["RS256"])
+        jwt.decode(forged, pub_pem, algorithms=["RS256", "ES256"])
         die("alg:none forgery accepted (broken)")
     except Exception:
         ok("alg:none forgery rejected")

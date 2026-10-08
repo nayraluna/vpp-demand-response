@@ -41,7 +41,7 @@ def _fetch() -> tuple[str, dict]:
     r = requests.get(f"{CA_URL}/ra/crl", verify=str(CA_CERT_FILE), timeout=5)
     r.raise_for_status()
     token = r.json()["crl"]
-    return token, jwt.decode(token, _anchor(), algorithms=["RS256"])
+    return token, jwt.decode(token, _anchor(), algorithms=["RS256", "ES256"])
 
 
 def _discard_relay_copy_if_foreign() -> None:
@@ -50,7 +50,7 @@ def _discard_relay_copy_if_foreign() -> None:
     if stored is None:
         return
     try:
-        jwt.decode(stored, _anchor(), algorithms=["RS256"])
+        jwt.decode(stored, _anchor(), algorithms=["RS256", "ES256"])
     except Exception:
         db.clear_crl()
 

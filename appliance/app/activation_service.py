@@ -40,7 +40,7 @@ def _adopt_crl(jws_token: str, cfg: dict) -> dict:
     anchor = root.public_key().public_bytes(
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
     try:
-        payload = jwt.decode(jws_token, anchor, algorithms=["RS256"])
+        payload = jwt.decode(jws_token, anchor, algorithms=["RS256", "ES256"])
     except Exception as e:
         return {"status": "refused", "reason": f"revocation list not signed by the CA: {e}"}
 

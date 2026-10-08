@@ -88,7 +88,7 @@ def fetch_crl() -> dict:
     anchor = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes()).public_key()
     return jwt.decode(r.json()["crl"], anchor.public_bytes(
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo),
-        algorithms=["RS256"])
+        algorithms=["RS256", "ES256"])
 
 
 def crl_entry(crl: dict, serial: str) -> dict | None:

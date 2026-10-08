@@ -48,7 +48,7 @@ def verify(jws_token: str, authenticated_user: str) -> dict:
         serialization.PublicFormat.SubjectPublicKeyInfo,
     )
     try:
-        payload = jwt.decode(jws_token, ven_pub, algorithms=["RS256"])
+        payload = jwt.decode(jws_token, ven_pub, algorithms=["RS256", "ES256"])
     except Exception as e:
         raise InvalidOwnerProof(f"appliance signature invalid: {e}")
 
