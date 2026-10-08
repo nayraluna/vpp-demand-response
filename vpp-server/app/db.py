@@ -75,14 +75,19 @@ def initialize() -> None:
                 c.execute(f"ALTER TABLE availability ADD COLUMN {column} {decl}")
             except sqlite3.OperationalError:
                 pass
-        # Last fetched CRL, relayed verbatim to the appliance in the poll response.
+        # Last fetched CRL (base64 DER), relayed verbatim to the appliance in the poll response.
         c.execute(
             """CREATE TABLE IF NOT EXISTS crl(
                    id         INTEGER PRIMARY KEY CHECK (id = 1),
-                   jws        TEXT NOT NULL,
+                   der        TEXT NOT NULL,
                    crl_number INTEGER NOT NULL,
                    fetched_at TEXT NOT NULL)"""
         )
+        try:
+            c.execute("ALTER TABLE crl RENAME COLUMN jws TO der")
+            c.execute("DELETE FROM crl")
+        except sqlite3.OperationalError:
+            pass
 
 
 def get_user(subject: str) -> dict | None:
@@ -306,22 +311,22 @@ def add_registration(ven_subject: str, ven_id: str, registration_id: str,
         )
 
 
-def store_crl(jws: str, crl_number: int, fetched_at: str) -> None:
+def store_crl(der_b64: str, crl_number: int, fetched_at: str) -> None:
     """Never moves to a lower crl_number, so an older list can never replace the held one."""
     with _conn() as c:
         c.execute(
-            """INSERT INTO crl(id, jws, crl_number, fetched_at) VALUES(1, ?, ?, ?)
+            """INSERT INTO crl(id, der, crl_number, fetched_at) VALUES(1, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
-                   jws=excluded.jws, crl_number=excluded.crl_number,
+                   der=excluded.der, crl_number=excluded.crl_number,
                    fetched_at=excluded.fetched_at
                WHERE excluded.crl_number >= crl.crl_number""",
-            (jws, crl_number, fetched_at),
+            (der_b64, crl_number, fetched_at),
         )
 
 
 def get_crl() -> str | None:
     with _conn() as c:
-        row = c.execute("SELECT jws FROM crl WHERE id=1").fetchone()
+        row = c.execute("SELECT der FROM crl WHERE id=1").fetchone()
     return row[0] if row else None
 
 

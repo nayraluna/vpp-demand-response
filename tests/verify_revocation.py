@@ -95,16 +95,44 @@ def revoke(key, cert_pem: str, serial: str, reason="keyCompromise"):
     return requests.post(f"{CA}/ra/revoke", json={"request": token}, verify=CA_FILE)
 
 
-def anchor_pem() -> bytes:
-    return x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes()).public_key().public_bytes(
-        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+def root_cert() -> x509.Certificate:
+    return x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
+
+
+def crl_view(crl: x509.CertificateRevocationList) -> dict:
+    """The CRL's fields as a plain dict: number, issuer, dates, and one entry per serial."""
+    def reason(e):
+        try:
+            reason = e.extensions.get_extension_for_class(x509.CRLReason).value.reason.name
+            head, *rest = reason.split("_")
+            return head + "".join(w.capitalize() for w in rest)
+        except x509.ExtensionNotFound:
+            return "unspecified"
+    return {"crl_number": crl.extensions.get_extension_for_class(x509.CRLNumber).value.crl_number,
+            "issuer": crl.issuer.rfc4514_string(),
+            "this_update": crl.last_update_utc.isoformat(),
+            "next_update": crl.next_update_utc.isoformat(),
+            "revoked": [{"serial": format(e.serial_number, "x"), "reason": reason(e)} for e in crl]}
+
+
+def make_crl(key, issuer: x509.Name, number: int, next_update: datetime.datetime) -> x509.CertificateRevocationList:
+    """An empty CRL signed by `key`: the fixture for forged, stale and held lists."""
+    issued = min(datetime.datetime.now(datetime.timezone.utc), next_update) - datetime.timedelta(minutes=5)
+    return (x509.CertificateRevocationListBuilder().issuer_name(issuer)
+            .last_update(issued).next_update(next_update)
+            .add_extension(x509.CRLNumber(number), critical=False)
+            .sign(key, hashes.SHA256()))
 
 
 def fetch_crl() -> tuple[str, dict]:
+    """The CA's CRL verified against the root: its base64 DER (what the VPP relays) and a view of it."""
     r = requests.get(f"{CA}/ra/crl", verify=CA_FILE)
     r.raise_for_status()
-    token = r.json()["crl"]
-    return token, jwt.decode(token, anchor_pem(), algorithms=["RS256", "ES256"])
+    crl = x509.load_der_x509_crl(r.content)
+    root = root_cert()
+    if crl.issuer != root.subject or not crl.is_signature_valid(root.public_key()):
+        die("the CRL served is not signed by the CA")
+    return base64.b64encode(r.content).decode(), crl_view(crl)
 
 
 def listed(payload: dict, serial: str) -> bool:
@@ -131,12 +159,12 @@ def onboard(key, cert_pem: str, client) -> str:
     return ven
 
 
-def plant_crl(token: str) -> None:
+def plant_crl(der_b64: str) -> None:
     """A misbehaving VPP: the relayed copy, numbered high so the VPP's own refresh keeps it."""
     with sqlite3.connect(str(DB_FILE)) as c:
-        c.execute("INSERT INTO crl(id, jws, crl_number, fetched_at) VALUES(1, ?, 999999, 'planted')"
-                  " ON CONFLICT(id) DO UPDATE SET jws=excluded.jws,"
-                  " crl_number=excluded.crl_number, fetched_at=excluded.fetched_at", (token,))
+        c.execute("INSERT INTO crl(id, der, crl_number, fetched_at) VALUES(1, ?, 999999, 'planted')"
+                  " ON CONFLICT(id) DO UPDATE SET der=excluded.der,"
+                  " crl_number=excluded.crl_number, fetched_at=excluded.fetched_at", (der_b64,))
 
 
 def clear_crl() -> None:
@@ -156,14 +184,11 @@ def inject_activation(ven: str, act_id: str) -> None:
 
 
 def forged_crl(number: int) -> str:
-    """A list signed by a self-made root: valid signature, wrong key."""
+    """A list signed by a self-made key under the CA's own name: valid signature, wrong key."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    now = datetime.datetime.now(datetime.timezone.utc)
-    payload = {"issuer": "CN=Fake CA", "crl_number": number, "this_update": now.isoformat(),
-               "next_update": (now + datetime.timedelta(days=1)).isoformat(), "revoked": []}
-    key_pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                                serialization.NoEncryption())
-    return jwt.encode(payload, key_pem, algorithm="RS256", headers={"typ": "application/crl+json"})
+    crl = make_crl(key, root_cert().subject, number,
+                   datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1))
+    return base64.b64encode(crl.public_bytes(serialization.Encoding.DER)).decode()
 
 
 def main():
@@ -237,14 +262,15 @@ def main():
             else die("victim was revoked by a revoked operator")
 
         print("G7: the list cannot be altered in transit")
-        token, _ = fetch_crl()
-        head, payload, sig = token.split(".")
-        forged = payload[:-2] + ("A" if payload[-2] != "A" else "B") + payload[-1]
+        der_b64, _ = fetch_crl()
+        der = bytearray(base64.b64decode(der_b64))
+        der[len(der) // 3] ^= 0x01  # one bit inside the signed TBS
         try:
-            jwt.decode(".".join([head, forged, sig]), anchor_pem(), algorithms=["RS256", "ES256"])
-            die("a tampered CRL verified")
-        except jwt.InvalidTokenError as e:
-            ok(f"a tampered CRL fails verification ({type(e).__name__})")
+            if x509.load_der_x509_crl(bytes(der)).is_signature_valid(root_cert().public_key()):
+                die("a tampered CRL verified")
+            ok("a tampered CRL fails signature verification")
+        except ValueError as e:
+            ok(f"a tampered CRL does not even parse ({str(e)[:40]})")
 
         print("G8: the appliance adopts the CA's list through its own poll")
         wkey, wpem, _, wserial = ra_identity(f"owner-{secrets.token_hex(3)}")
@@ -325,18 +351,18 @@ def main():
         sys.path.insert(0, str(ROOT / "vpp-server"))
         from app import revocation  # noqa: E402
         revocation.CA_URL, revocation.MAX_AGE = "https://127.0.0.1:1", 0
-        held = {"crl_number": 1, "revoked": [], "next_update": (
-            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).isoformat()}
-        revocation._crl = dict(held)
-        ok("a list still within next_update is served while the CA is down") \
-            if revocation.current()["crl_number"] == 1 \
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        revocation._crl = make_crl(key, root_cert().subject, 1, now + datetime.timedelta(hours=1))
+        ok("a list still within nextUpdate is served while the CA is down") \
+            if revocation.number(revocation.current()) == 1 \
             else die("cached list not served")
-        revocation._crl = {**held, "next_update": (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=1)).isoformat()}
+        revocation._crl = make_crl(key, root_cert().subject, 1, now - datetime.timedelta(minutes=1))
         try:
             revocation.current()
             die("an expired list was served while the CA is down")
         except revocation.Unavailable as e:
-            ok(f"past next_update the VPP refuses to decide: {e}")
+            ok(f"past nextUpdate the VPP refuses to decide: {str(e)[:60]}")
 
         print(f"\nREVOCATION COMPLETE: {passed} checks passed.")
     finally:

@@ -30,35 +30,35 @@ class NotConfigured(Exception):
     """The appliance is still in pairing mode."""
 
 
-def _adopt_crl(jws_token: str, cfg: dict) -> dict:
-    """Adopt the CA-signed revocation list the VTN relays. The number must not go
+def _adopt_crl(der_b64: str, cfg: dict) -> dict:
+    """Adopt the CA's X.509 CRL the VTN relays. The CRL number must not go
     backwards, or a VPP could serve an older list to hide a revocation."""
     try:
         root = hsm.trust_anchor()
     except Exception as e:
         return {"status": "refused", "reason": f"factory root unavailable: {e}"}
-    anchor = root.public_key().public_bytes(
-        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
     try:
-        payload = jwt.decode(jws_token, anchor, algorithms=["RS256", "ES256"])
+        crl = x509.load_der_x509_crl(base64.b64decode(der_b64))
     except Exception as e:
-        return {"status": "refused", "reason": f"revocation list not signed by the CA: {e}"}
-
-    number, stored = payload.get("crl_number"), cfg.get("crl_number") or 0
-    if not isinstance(number, int) or isinstance(number, bool) or number < 0:
-        return {"status": "refused", "reason": "revocation list carries no valid number"}
+        return {"status": "refused", "reason": f"revocation list is malformed: {e}"}
+    if crl.issuer != root.subject or not crl.is_signature_valid(root.public_key()):
+        return {"status": "refused", "reason": "revocation list not signed by the CA"}
+    try:
+        number = crl.extensions.get_extension_for_class(x509.CRLNumber).value.crl_number
+    except x509.ExtensionNotFound:
+        return {"status": "refused", "reason": "revocation list carries no CRL number"}
+    if crl.next_update_utc is None:
+        return {"status": "refused", "reason": "revocation list carries no nextUpdate"}
+    stored = cfg.get("crl_number") or 0
     if number < stored:
         return {"status": "refused",
                 "reason": f"stale revocation list {number} (ours is {stored}): "
                           "an older list cannot replace a newer one"}
-    revoked = payload.get("revoked")
-    if not isinstance(revoked, list) or not payload.get("next_update"):
-        return {"status": "refused", "reason": "revocation list is malformed"}
 
-    # An equal number still refreshes next_update: the CA re-signs the same list with a new window.
+    # An equal number still refreshes nextUpdate: the CA re-signs the same list with a new window.
     cfg["crl_number"] = number
-    cfg["crl_next_update"] = payload["next_update"]
-    cfg["crl_revoked"] = [e.get("serial") for e in revoked]
+    cfg["crl_next_update"] = crl.next_update_utc.isoformat()
+    cfg["crl_revoked"] = [format(r.serial_number, "x") for r in crl]
     return {"status": "current" if number == stored else "stored",
             "crl_number": number, "revoked": len(cfg["crl_revoked"])}
 

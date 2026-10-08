@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel
 
 from . import ra_service, registry
@@ -66,8 +66,8 @@ def ra_revoke(req: RevocationRequest) -> dict:
 
 
 @app.get("/ra/crl")
-def ra_crl() -> dict:
-    return {"crl": ra_service.crl_jws()}
+def ra_crl() -> Response:
+    return Response(content=ra_service.crl_der(), media_type="application/pkix-crl")
 
 
 class RenewalRequest(BaseModel):

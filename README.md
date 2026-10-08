@@ -42,14 +42,13 @@ Everything rests on a single X.509 trust root.
 | Owner proof | Appliance HSM | Binds the device to its owner and its certified parameters |
 | Availability calendar | User | Weekly schedule, with a monotonic version that blocks rollback |
 | Participation evidence | Appliance HSM | The signed record a reward requires |
-| Revocation list | CA | The withdrawn serials, numbered monotonically and valid 24 h, relayed to the appliance in every poll |
 | Revocation and renewal requests | Operator, certificate holder | Carry their own certificate, because the CA's listener has no client certificates |
 
 The user's half of that never leaves the phone. The key is generated inside the Android Keystore and is non-exportable, so the app signs the CSR, the pairing bundle, the calendar and the mTLS handshake in place rather than holding key material it could leak.
 
 **The appliance enforces its owner's calendar locally.** Not even the platform's own coordinator can activate it outside the declared slots, its maximum curtailment time, or its recovery period. Activations reach it by outbound polling only, so nothing ever connects *into* the home. It trusts only the root installed at the factory next to its signing key, so a pairing bundle cannot bring its own.
 
-**Credentials can be withdrawn and renewed.** An operator revokes a certificate by serial with a signed request, and the CA publishes its revocation list as a JWS under the root key, numbered monotonically and valid for 24 hours. The VPP checks the list on every mutual-TLS request and at enrolment, and relays it to the appliance, which verifies it against its factory root, refuses one with a lower number and stops acting when its copy expires. The CA issues one live certificate per subject, and the VPP does not let a different certificate take over an enrolled account while the old one stands. Renewal re-keys under the same subject and revokes the old certificate as superseded in the same act.
+**Credentials can be withdrawn and renewed.** An operator revokes a certificate by serial with a signed request, and the CA publishes an X.509 CRL (RFC 5280) signed with the root key, with a monotonic CRL number and a 24 hour validity. Every leaf names it in its CRL distribution point. The VPP checks the list on every mutual-TLS request and at enrolment, and relays it to the appliance, which verifies it against its factory root, refuses one with a lower number and stops acting when its copy expires. The CA issues one live certificate per subject, and the VPP does not let a different certificate take over an enrolled account while the old one stands. Renewal re-keys under the same subject and revokes the old certificate as superseded in the same act.
 
 **Identity proof with the Spanish national eID.** The app reads the DNIe over NFC through a PACE secure channel, validates the card's chain up to the `AC RAIZ DNIE 2` root, and has the chip sign a freshly generated nonce with the user's PIN, so a copied public certificate cannot pass for a login.
 
@@ -67,7 +66,7 @@ The Android client is covered too. `RegistrationFlowTest` drives the real protoc
 
 ## What this prototype does not do
 
-- **Revocation is a signed list, not OCSP.** The list is a JWS under the root key rather than an RFC 5280 CRL, the certificates carry no distribution point, and there is no OCSP. The DNIe's own revocation status is not checked.
+- **Revocation is a CRL, not OCSP.** Relying parties decide from a list they already hold, which is what an appliance without network access needs, and nothing answers live status queries. The DNIe's own revocation status is not checked.
 - **Issuance-side validation is missing.** The CA verifies possession of the key but not the identity behind it, nor the operator role attribute. Both checks belong in the RA role and currently rest on the requesting side.
 - **The HSM is emulated and the curtailment is simulated.** A signature proves the appliance produced the evidence, not that power flowed differently. Real metering behind the same signing boundary is the natural next step.
 - **Stored evidence is verified once, at submission.** No later path compares a participation row against the signature stored beside it, and the reward is computed from the row's own columns. A `reduction_pct` edited in the database would change a payout without invalidating anything. The availability path is the opposite: the appliance re-verifies the calendar on every poll, which is why a rolled-back row planted directly in the table is refused.

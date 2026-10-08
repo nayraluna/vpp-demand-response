@@ -82,17 +82,27 @@ def renew(key, cert_pem: str, new_key, subject: x509.Name):
     return requests.post(f"{CA}/ra/renew", json={"request": token}, verify=CA_FILE)
 
 
-def fetch_crl() -> dict:
+def fetch_crl() -> x509.CertificateRevocationList:
     r = requests.get(f"{CA}/ra/crl", verify=CA_FILE)
     r.raise_for_status()
-    anchor = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes()).public_key()
-    return jwt.decode(r.json()["crl"], anchor.public_bytes(
-        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo),
-        algorithms=["RS256", "ES256"])
+    root = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
+    crl = x509.load_der_x509_crl(r.content)
+    if crl.issuer != root.subject or not crl.is_signature_valid(root.public_key()):
+        die("the CRL served is not signed by the CA")
+    return crl
 
 
-def crl_entry(crl: dict, serial: str) -> dict | None:
-    return next((e for e in crl["revoked"] if e["serial"] == serial), None)
+def crl_entry(crl: x509.CertificateRevocationList, serial: str) -> dict | None:
+    e = crl.get_revoked_certificate_by_serial_number(int(serial, 16))
+    if e is None:
+        return None
+    try:
+        name = e.extensions.get_extension_for_class(x509.CRLReason).value.reason.name
+        head, *rest = name.split("_")
+        reason = head + "".join(w.capitalize() for w in rest)
+    except x509.ExtensionNotFound:
+        reason = "unspecified"
+    return {"serial": serial, "reason": reason}
 
 
 def declare(key, cert_pem: str, client, ven: str) -> None:

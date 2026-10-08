@@ -1,5 +1,6 @@
 import base64
 import datetime
+import os
 from pathlib import Path
 
 import ipaddress
@@ -9,6 +10,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import NameOID
+from cryptography.x509 import ReasonFlags
 
 from . import registry
 
@@ -38,6 +40,19 @@ class NotOperator(Exception):
 
 # A relying party whose copy is older than this must refresh it, and refuses to act if it cannot.
 CRL_VALIDITY = datetime.timedelta(hours=24)
+# Where relying parties fetch the list; written into every leaf as its CRL distribution point.
+CRL_URL = os.environ.get("TFG_CRL_URL", "https://127.0.0.1:8081/ra/crl")
+
+
+def _camel(name: str) -> str:
+    head, *rest = name.split("_")
+    return head + "".join(w.capitalize() for w in rest)
+
+
+# RFC 5280 reason codes by their usual names (keyCompromise, superseded, ...). "unspecified"
+# is accepted but encoded as no reason at all, as the RFC asks.
+REASONS = {_camel(f.name): f for f in ReasonFlags if f not in (ReasonFlags.unspecified, ReasonFlags.remove_from_crl)}
+REASONS["unspecified"] = None
 
 
 def initialize() -> None:
@@ -146,6 +161,9 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
     )
     if san:
         builder = builder.add_extension(_san(san), critical=False)
+    builder = builder.add_extension(x509.CRLDistributionPoints([x509.DistributionPoint(
+        full_name=[x509.UniformResourceIdentifier(CRL_URL)],
+        relative_name=None, reasons=None, crl_issuer=None)]), critical=False)
     cert = builder.sign(_ca_key, hashes.SHA256())
 
     serial_hex = format(serial, "x")
@@ -201,8 +219,10 @@ def verify_revocation_request(token: str) -> dict:
     serial = payload.get("serial")
     if not isinstance(serial, str) or not serial:
         raise InvalidRequest("request must name the serial to revoke")
-    return {"serial": serial,
-            "reason": str(payload.get("reason") or "unspecified"),
+    reason = str(payload.get("reason") or "unspecified")
+    if reason not in REASONS:
+        raise InvalidRequest(f"unknown revocation reason {reason!r}, use one of {sorted(REASONS)}")
+    return {"serial": serial, "reason": reason,
             "requested_by": signer.subject.rfc4514_string()}
 
 
@@ -228,19 +248,21 @@ def renew_from_request(token: str) -> dict:
     return {**issued, "superseded": old_serial, "crl_number": registry.crl_number()}
 
 
-def crl_jws() -> str:
-    """The revocation list signed with the CA key; relying parties hold the anchor, so no x5c."""
+def crl_der() -> bytes:
+    """The RFC 5280 CRL signed with the CA key: CRLNumber, AKI, and a reason per entry."""
     now = datetime.datetime.now(datetime.timezone.utc)
-    payload = {
-        "issuer": _ca_cert.subject.rfc4514_string(),
-        "crl_number": registry.crl_number(),
-        "this_update": now.isoformat(),
-        "next_update": (now + CRL_VALIDITY).isoformat(),
-        "revoked": registry.revoked(now),
-    }
-    key_pem = _ca_key.private_bytes(
-        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption())
-    alg = "ES256" if isinstance(_ca_key, ec.EllipticCurvePrivateKey) else "RS256"
-    return jwt.encode(payload, key_pem, algorithm=alg,
-                      headers={"typ": "application/crl+json"})
+    builder = (x509.CertificateRevocationListBuilder()
+               .issuer_name(_ca_cert.subject)
+               .last_update(now)
+               .next_update(now + CRL_VALIDITY)
+               .add_extension(x509.CRLNumber(registry.crl_number()), critical=False)
+               .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(_ca_cert.public_key()),
+                              critical=False))
+    for e in registry.revoked(now):
+        entry = (x509.RevokedCertificateBuilder()
+                 .serial_number(int(e["serial"], 16))
+                 .revocation_date(datetime.datetime.fromisoformat(e["revoked_at"])))
+        if REASONS.get(e["reason"]):
+            entry = entry.add_extension(x509.CRLReason(REASONS[e["reason"]]), critical=False)
+        builder = builder.add_revoked_certificate(entry.build())
+    return builder.sign(_ca_key, hashes.SHA256()).public_bytes(serialization.Encoding.DER)

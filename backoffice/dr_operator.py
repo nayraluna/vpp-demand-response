@@ -91,17 +91,24 @@ def revoke(serial: str, reason: str) -> None:
 def show_crl() -> None:
     r = requests.get(f"{CA}/ra/crl", verify=CA_FILE)
     r.raise_for_status()
-    anchor = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes()).public_key()
-    crl = jwt.decode(r.json()["crl"], anchor.public_bytes(
-        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo),
-        algorithms=["RS256", "ES256"])
-    print(f"CRL #{crl['crl_number']} from {crl['issuer']}")
-    print(f"  this_update {crl['this_update']}")
-    print(f"  next_update {crl['next_update']}")
-    if not crl["revoked"]:
+    root = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
+    crl = x509.load_der_x509_crl(r.content)
+    if crl.issuer != root.subject or not crl.is_signature_valid(root.public_key()):
+        raise SystemExit("the CRL served is not signed by our CA")
+    number = crl.extensions.get_extension_for_class(x509.CRLNumber).value.crl_number
+    print(f"CRL #{number} from {crl.issuer.rfc4514_string()}")
+    print(f"  thisUpdate {crl.last_update_utc.isoformat()}")
+    print(f"  nextUpdate {crl.next_update_utc.isoformat()}")
+    if len(crl) == 0:
         print("  (no revoked certificates)")
-    for e in crl["revoked"]:
-        print(f"  {e['serial']}  {e['revoked_at'][:19]}  {e['reason']}")
+    for e in crl:
+        try:
+            name = e.extensions.get_extension_for_class(x509.CRLReason).value.reason.name
+            head, *rest = name.split("_")
+            reason = head + "".join(w.capitalize() for w in rest)
+        except x509.ExtensionNotFound:
+            reason = "unspecified"
+        print(f"  {format(e.serial_number, 'x')}  {e.revocation_date_utc.isoformat()[:19]}  {reason}")
 
 
 def _request(path: str, body: dict) -> dict:
