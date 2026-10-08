@@ -10,8 +10,6 @@ def _conn() -> sqlite3.Connection:
 
 
 def initialize() -> None:
-    # One row per certificate the CA has issued.
-    # CA checks if public key was already enrolled, and if the certificate has been revoked.
     with _conn() as c:
         c.execute(
             """CREATE TABLE IF NOT EXISTS issued(
@@ -24,7 +22,6 @@ def initialize() -> None:
                    reason      TEXT)"""
         )
         c.execute("CREATE INDEX IF NOT EXISTS issued_key_id ON issued(key_id)")
-        # Small key/value store. Today it holds one thing, the CRL number.
         c.execute(
             """CREATE TABLE IF NOT EXISTS meta(
                    key   TEXT PRIMARY KEY,
@@ -43,7 +40,6 @@ def record(serial: str, key_id: str, subject: str,
 
 
 def serial_for_key(key_id: str) -> str | None:
-    """The serial already issued for this public key, if there is one."""
     with _conn() as c:
         row = c.execute(
             "SELECT serial FROM issued WHERE key_id=? LIMIT 1", (key_id,)
@@ -52,8 +48,7 @@ def serial_for_key(key_id: str) -> str | None:
 
 
 def live_serial_for_subject(subject: str, now: datetime.datetime) -> str | None:
-    """The serial of this subject's current certificate: issued here, not
-    revoked and not yet expired. None if the subject holds no live one."""
+    """Serial of the subject's certificate that is neither revoked nor expired, if any."""
     with _conn() as c:
         row = c.execute(
             "SELECT serial FROM issued WHERE subject=? AND revoked_at IS NULL"
@@ -77,8 +72,7 @@ def lookup(serial: str) -> dict | None:
 
 def revoke(serial: str, reason: str,
            when: datetime.datetime | None = None) -> bool:
-    """Mark a certificate revoked.
-    False if the serial was never issued here or was already revoked."""
+    """False if the serial was never issued here or was already revoked."""
     when = when or datetime.datetime.now(datetime.timezone.utc)
     with _conn() as c:
         changed = c.execute(
@@ -100,8 +94,7 @@ def is_revoked(serial: str) -> bool:
 
 
 def revoked(now: datetime.datetime | None = None) -> list[dict]:
-    """CRL has the revoked certificates that had not expired yet.
-    Expired ones drop out on their own (to stop the list from growing)."""
+    """Revoked certificates not yet expired; expired ones drop out so the list does not grow."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     with _conn() as c:
         rows = c.execute(
@@ -114,18 +107,14 @@ def revoked(now: datetime.datetime | None = None) -> list[dict]:
 
 
 def crl_number() -> int:
-    """Monotonic counter, bumped on every revocation. The same role the version
-    plays in the availability calendar: a relying party refuses a list older
-    than the one it already holds."""
+    """Monotonic, bumped on every revocation, so a relying party can refuse a list older than its own."""
     with _conn() as c:
         row = c.execute("SELECT value FROM meta WHERE key='crl_number'").fetchone()
     return int(row[0]) if row else 0
 
 
 def _bump_crl_number(c: sqlite3.Connection) -> int:
-    # Takes the caller's connection so the bump commits together with the
-    # revocation that caused it. Done separately, one could land without the
-    # other.
+    # Uses the caller's connection so the bump commits together with the revocation that caused it.
     row = c.execute("SELECT value FROM meta WHERE key='crl_number'").fetchone()
     n = (int(row[0]) if row else 0) + 1
     c.execute("INSERT INTO meta(key, value) VALUES('crl_number', ?)"

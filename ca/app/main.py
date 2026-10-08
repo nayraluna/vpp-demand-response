@@ -58,8 +58,6 @@ def ra_revoke(req: RevocationRequest) -> dict:
         return {"revoked": serial, "reason": order["reason"],
                 "requested_by": order["requested_by"],
                 "crl_number": registry.crl_number()}
-    # revoke() said no: either the serial was never issued here, or it is
-    # already revoked. Tell the two apart so the caller knows which happened.
     known = registry.lookup(serial)
     if known is None:
         raise HTTPException(status_code=404, detail="serial not issued by this CA")

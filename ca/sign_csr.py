@@ -1,11 +1,5 @@
 """Sign a CSR offline, on the CA host, with a named profile.
 
-This is how platform identities (the VPP, an appliance at the factory) obtain
-their certificates: the component generates its own key pair, writes a CSR, and
-only the CSR travels here. The network endpoint /ra/issue is for users and
-operators and always applies the client profile. Everything signed here is
-recorded in the register like any other certificate, so it can be revoked.
-
     python sign_csr.py --csr ../certs/vpp.csr --out ../certs/vpp.crt \\
         --profile tls-server+signing --san localhost,127.0.0.1,10.0.2.2
 """

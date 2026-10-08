@@ -13,6 +13,16 @@ Anything that looks like a failure but is not is in
 - Raspberry Pi off
 - Activate the venv in every new terminal: `.venv\Scripts\activate`.
 
+To see what the PKI actually contains, OpenSSL reads every file in `certs/`
+(Git Bash; `openssl req` needs `OPENSSL_CONF` unset or pointing to a real file):
+
+```bash
+openssl x509 -in certs/CA.crt -noout -text        # the root: subject, validity, CA:TRUE, keyCertSign
+openssl req  -in certs/vpp.csr -noout -text       # what the VPP asked for: subject and public key only
+openssl x509 -in certs/vpp.crt -noout -text       # what the CA issued: the profile's extensions and the SAN
+openssl verify -CAfile certs/CA.crt certs/VEN.crt # the chain: signature, dates and CA:TRUE on the issuer
+```
+
 ---
 
 ## 1. Verification suite

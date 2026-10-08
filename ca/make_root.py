@@ -1,11 +1,5 @@
 """Create the platform root and the CA's own TLS certificate.
 
-This is the one step that belongs to the CA alone. Every other identity is
-produced by its own component as a key pair and a CSR, and only the CSR comes
-here to be signed (see sign_csr.py). Re-running this creates a NEW root, so the
-register of certificates issued under the old one is wiped: nothing it listed
-chains to the new anchor any more.
-
     python make_root.py [--algo rsa|ec] [--san 192.168.1.50,...]
 """
 import argparse
@@ -33,8 +27,7 @@ TLS_SUBJECT = x509.Name([
     x509.NameAttribute(NameOID.ORGANIZATION_NAME, "VPP Platform"),
     x509.NameAttribute(NameOID.COUNTRY_NAME, "ES"),
 ])
-# localhost and 127.0.0.1 cover the suite, 10.0.2.2 is the Android emulator's
-# alias for its host. A phone or a Raspberry Pi needs this machine's address too.
+# 10.0.2.2 is the Android emulator's alias for its host.
 BASE_SAN = ["localhost", "127.0.0.1", "10.0.2.2"]
 
 
@@ -58,8 +51,7 @@ def main() -> None:
     args = ap.parse_args()
     CERTS.mkdir(exist_ok=True)
 
-    # 1. The root. Explicit basicConstraints and keyUsage, because strict RFC
-    #    5280 validation (Python 3.13 on the Pi) rejects a root without them.
+    # Explicit basicConstraints and keyUsage: strict RFC 5280 validation rejects a root without them.
     root_key = generate_key(args.algo)
     now = datetime.datetime.now(datetime.timezone.utc)
     root = (
@@ -81,13 +73,11 @@ def main() -> None:
     (CERTS / "CA.crt").write_bytes(root.public_bytes(serialization.Encoding.PEM))
     print(f"root: {root.subject.rfc4514_string()}, valid {args.days} days")
 
-    # 2. A new root means a new CA. Whatever the old one issued is history.
     if registry.DB_FILE.exists():
         registry.DB_FILE.unlink()
         print("register wiped: certificates of the previous root no longer chain")
     ra_service.initialize()
 
-    # 3. The CA's TLS identity, the only certificate the CA requests from itself.
     tls_key = generate_key(args.algo)
     csr = x509.CertificateSigningRequestBuilder().subject_name(TLS_SUBJECT).sign(
         tls_key, hashes.SHA256())

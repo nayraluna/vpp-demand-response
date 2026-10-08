@@ -17,8 +17,6 @@ def initialize() -> None:
                    cert_pem    TEXT NOT NULL,
                    enrolled_at TEXT NOT NULL)"""
         )
-        # Activations issued to appliances. Written when a DR event is issued
-        # (step 3); read by participant selection to enforce recovery time.
         c.execute(
             """CREATE TABLE IF NOT EXISTS activations(
                    activation_id TEXT PRIMARY KEY,
@@ -31,11 +29,10 @@ def initialize() -> None:
                    ends_at       TEXT,
                    delivered_at  TEXT)"""
         )
-        # Databases created before the nonce was dropped still carry the column.
         try:
             c.execute("ALTER TABLE activations DROP COLUMN nonce")
         except sqlite3.OperationalError:
-            pass  # already gone
+            pass
         c.execute(
             """CREATE TABLE IF NOT EXISTS vens(
                    ven_subject     TEXT PRIMARY KEY,
@@ -45,10 +42,7 @@ def initialize() -> None:
                    profile         TEXT,
                    registered_at   TEXT NOT NULL)"""
         )
-        # Ownership recorded from the owner proof. The appliance certificate is
-        # kept (it verifies the appliance's future messages) together with the
-        # ownership relation and the declared parameters; the proof SIGNATURE is
-        # verified on arrival and then discarded - it only establishes the bind.
+        # The owner proof signature is verified on arrival and not stored; only the binding is.
         c.execute(
             """CREATE TABLE IF NOT EXISTS appliances(
                    ven_subject   TEXT PRIMARY KEY,
@@ -59,10 +53,7 @@ def initialize() -> None:
                    recovery      INTEGER NOT NULL,
                    bound_at      TEXT NOT NULL)"""
         )
-        # Participation evidence. Unlike the owner proof, whose signature is
-        # discarded once it has established the binding, HERE THE SIGNATURE IS
-        # THE RECORD: it is what allows the participation to be audited and
-        # remunerated afterwards (Design, Data Architecture).
+        # Evidence keeps the signed JWS: it is the auditable record behind remuneration.
         c.execute(
             """CREATE TABLE IF NOT EXISTS evidence(
                    activation_id TEXT PRIMARY KEY,
@@ -72,12 +63,7 @@ def initialize() -> None:
                    jws           TEXT NOT NULL,
                    verified_at   TEXT NOT NULL)"""
         )
-        # Operational data: the weekly availability calendar declared by the
-        # user, stored as semi-structured JSON (Design, Data Architecture).
-        # Alongside the parsed slots (used by participant selection), the row
-        # keeps the owner-signed JWS verbatim and its version: the appliance
-        # retrieves the signed artefact through its outbound polling and
-        # enforces the signature and the monotonic version itself.
+        # The owner-signed JWS is kept verbatim: the appliance re-verifies it when it polls.
         c.execute(
             """CREATE TABLE IF NOT EXISTS availability(
                    ven_subject TEXT PRIMARY KEY,
@@ -88,9 +74,8 @@ def initialize() -> None:
             try:
                 c.execute(f"ALTER TABLE availability ADD COLUMN {column} {decl}")
             except sqlite3.OperationalError:
-                pass  # column already present
-        # The CA's revocation list as last fetched, relayed verbatim to the
-        # appliance in the poll response exactly like the calendar. One row.
+                pass
+        # Last fetched CRL, relayed verbatim to the appliance in the poll response.
         c.execute(
             """CREATE TABLE IF NOT EXISTS crl(
                    id         INTEGER PRIMARY KEY CHECK (id = 1),
@@ -181,7 +166,6 @@ def add_activation(activation: dict) -> None:
 
 
 def pending_activations(ven_subject: str) -> list[dict]:
-    """Activations issued to this appliance that it has not yet retrieved."""
     with _conn() as c:
         rows = c.execute(
             """SELECT activation_id, day, slot_start, slot_end, action,
@@ -241,7 +225,6 @@ def add_evidence(activation_id: str, ven_subject: str, executed_at: str,
 
 
 def evidence_for_owner(owner: str) -> list[dict]:
-    """Verified participations of every appliance belonging to this user."""
     with _conn() as c:
         rows = c.execute(
             """SELECT e.activation_id, e.ven_subject, e.executed_at,
@@ -261,7 +244,7 @@ def evidence_for_owner(owner: str) -> list[dict]:
 
 
 def last_activation_end(ven_subject: str) -> str | None:
-    """When this appliance's most recent activation finished (for recovery)."""
+    """Used to enforce the recovery time between activations."""
     with _conn() as c:
         row = c.execute(
             """SELECT ends_at FROM activations WHERE ven_subject=? AND ends_at IS NOT NULL
@@ -272,7 +255,6 @@ def last_activation_end(ven_subject: str) -> str | None:
 
 
 def list_appliances_for_selection() -> list[dict]:
-    """Every enrolled appliance with the data participant selection needs."""
     with _conn() as c:
         rows = c.execute(
             """SELECT a.ven_subject, a.nominal_power, a.max_curtail, a.recovery,
@@ -325,8 +307,7 @@ def add_registration(ven_subject: str, ven_id: str, registration_id: str,
 
 
 def store_crl(jws: str, crl_number: int, fetched_at: str) -> None:
-    """Keep the relay copy. It never moves to a lower number, so a copy the VPP
-    holds cannot be replaced by an older list however it got there."""
+    """Never moves to a lower crl_number, so an older list can never replace the held one."""
     with _conn() as c:
         c.execute(
             """INSERT INTO crl(id, jws, crl_number, fetched_at) VALUES(1, ?, ?, ?)

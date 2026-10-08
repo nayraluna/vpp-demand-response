@@ -7,15 +7,11 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa, ec
 from cryptography.x509.oid import NameOID
 
-# The emulated HSM is a directory. The real one would hold the key inside the
-# module and expose only signing; this one holds the key as a file written by
-# provision.py, the factory step, and never read by anyone else.
+# Emulated HSM: the key is a file written by provision.py and read by nobody else.
 CERTS_DIR = Path(__file__).resolve().parent.parent / "certs"
 KEY_FILE = CERTS_DIR / "VEN.key"
 CERT_FILE = CERTS_DIR / "VEN.crt"
-# The platform root, installed next to the signing key at the factory. It is
-# the only thing the appliance trusts before pairing, so a bundle has to prove
-# itself against this anchor rather than against one it brings along.
+# Factory root, the only trust anchor: a bundle proves itself against this, never one it brings.
 CA_FILE = CERTS_DIR / "CA.crt"
 
 _private_key = None
@@ -36,8 +32,6 @@ def subject() -> str:
 
 
 def trust_anchor():
-    """The factory-installed CA root. Missing means the device was never
-    provisioned, which is a hard error rather than something to work around."""
     try:
         return x509.load_pem_x509_certificate(CA_FILE.read_bytes())
     except FileNotFoundError:
@@ -49,12 +43,7 @@ def certificate_pem() -> str:
 
 
 def nominal_power() -> int:
-    """The nominal power P certified by the CA, read from the VEN
-    certificate subject (OU=P=<watts>).
-
-    P is certified rather than self-declared so that a compromised appliance
-    cannot over-declare its capacity to claim a larger reward.
-    """
+    """P from the certificate subject (OU=P=<watts>): certified, so a compromised appliance cannot over-declare it."""
     return parse_nominal_power(_certificate)
 
 
@@ -80,11 +69,7 @@ def sign(message: str) -> str:
 
 
 def sign_jws(payload: dict, typ: str = "application/owner-proof+json") -> str:
-    """Sign `payload` inside the HSM as a compact JWS (the PAS4 container).
-
-    The VEN certificate travels in the x5c header so the VPP can verify the
-    signature and chain it to the CA without knowing the appliance in advance.
-    """
+    """Compact JWS signed in the HSM, VEN certificate in x5c so the VPP can chain it to the CA."""
     if not isinstance(_private_key, rsa.RSAPrivateKey):
         raise RuntimeError("sign_jws currently supports RS256 (RSA) only")
     key_pem = _private_key.private_bytes(

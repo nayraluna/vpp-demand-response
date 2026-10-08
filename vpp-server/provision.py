@@ -1,12 +1,7 @@
-"""Provision the VPP's own identity. The private key is generated here and
-never leaves this component: only the CSR goes to the CA, and only the signed
-certificate comes back.
+"""Provision the VPP identity: the private key never leaves this component, only the CSR goes to the CA.
 
     python provision.py request [--algo rsa|ec]     writes vpp.key and vpp.csr
     python provision.py install <signed.crt>        writes vpp.crt
-
-In the development layout everything lives in ../certs/, which is where the
-VPP services read their identity from.
 """
 import argparse
 import shutil

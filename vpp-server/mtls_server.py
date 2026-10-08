@@ -15,11 +15,7 @@ from app import (availability, crypto_service, db,  # noqa: E402
                  evidence, owner_proof, remuneration, revocation, scheduling)
 
 CERTS = Path(__file__).resolve().parent.parent / "certs"
-# All interfaces by default: emulator (10.0.2.2) AND physical devices on the
-# LAN. TFG_MTLS_HOST overrides it; run_all.ps1 pins 127.0.0.1 so the gates are
-# isolated from any OTHER holder of the VEN identity on the LAN (the deployed
-# Raspberry Pi polls this endpoint every minute and would otherwise consume
-# the activations the gates issue for the local appliance).
+# run_all.ps1 pins 127.0.0.1 so a LAN appliance with the same VEN identity cannot consume gate activations.
 HOST = os.environ.get("TFG_MTLS_HOST", "0.0.0.0")
 PORT = 8443
 
@@ -34,9 +30,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _refused_as_revoked(self, cert) -> bool:
-        # The TLS layer checks that the certificate chains to the CA. It cannot
-        # know whether the CA has since withdrawn it, so that is checked here,
-        # once per request, before any handler sees the identity.
+        # TLS only checks the chain; revocation is checked here before any handler sees the identity.
         try:
             if revocation.is_revoked(cert):
                 self._json(403, {"error": "certificate revoked",
@@ -48,16 +42,13 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self):
-        # The client cert was already validated against the CA root by the TLS layer
-        # (CERT_REQUIRED + CA.crt). Read it and identify the enrolled user.
         der = self.connection.getpeercert(binary_form=True)
         cert = x509.load_der_x509_certificate(der)
         if self._refused_as_revoked(cert):
             return
         subject = cert.subject.rfc4514_string()
 
-        # The appliance polls with its VEN certificate, not a user certificate:
-        # this is the pull leg of the operational phase (outbound, NAT-safe).
+        # The appliance polls with its VEN certificate, so it is routed before the user lookup.
         if self.path == "/openadr/poll":
             return self._openadr_poll(subject)
 
@@ -70,7 +61,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"authenticated": True, "user": subject,
                                     "enrolled_at": user["enrolled_at"]})
         if self.path == "/availability":
-            # Everything this user owns, with the calendar declared for each.
             out = []
             for appliance in db.list_appliances_by_owner(subject):
                 declared = db.get_availability(appliance["ven_subject"])
@@ -80,19 +70,13 @@ class Handler(BaseHTTPRequestHandler):
                             "updated_at": declared["updated_at"] if declared else None})
             return self._json(200, {"user": subject, "appliances": out})
         if self.path == "/participation":
-            # What the mobile application shows the user: the participations of
-            # their appliances that the VPP has VERIFIED, with the energy not
-            # consumed and what it earned them. Nothing that lacks verified
-            # evidence appears here, so no reward can be claimed without proof.
+            # Only participations with verified evidence: no reward without proof.
             records = db.evidence_for_owner(subject)
             return self._json(200, {"user": subject,
                                     **remuneration.summarise(records)})
         return self._json(404, {"error": "not found"})
 
     def do_POST(self):
-        # The client certificate was already validated against the CA root by the TLS
-        # layer; who it identifies depends on the endpoint (the user forwards the
-        # owner proof, the appliance registers itself as a VEN).
         der = self.connection.getpeercert(binary_form=True)
         cert = x509.load_der_x509_certificate(der)
         if self._refused_as_revoked(cert):
@@ -120,15 +104,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(404, {"error": "not found"})
 
     def _availability(self, user_subject: str, body: dict):
-        """Operational step 1: the user declares when an appliance may be curtailed.
-
-        The calendar arrives as a JWS signed by the owner, carrying a
-        monotonically increasing version. The VPP stores the parsed slots for
-        participant selection and keeps the signed artefact verbatim: the
-        appliance retrieves it through its outbound polling and re-verifies
-        signature and version itself, so the VPP cannot modify what the owner
-        signed nor roll it back.
-        """
+        """The user declares when an appliance may be curtailed, as an owner-signed versioned JWS."""
         if db.get_user(user_subject) is None:
             return self._json(403, {"error": "valid platform certificate but not enrolled"})
 
@@ -136,7 +112,6 @@ class Handler(BaseHTTPRequestHandler):
         appliance = db.get_appliance(ven)
         if appliance is None:
             return self._json(404, {"error": f"unknown appliance {ven!r}"})
-        # Only the owner recorded by the owner proof may declare availability.
         if appliance["owner"] != user_subject:
             return self._json(403, {"error": "appliance belongs to another user"})
 
@@ -145,9 +120,7 @@ class Handler(BaseHTTPRequestHandler):
         except availability.InvalidAvailability as e:
             return self._json(400, {"error": str(e)})
 
-        # Same monotonicity the appliance enforces, applied at the door: a
-        # stale declaration (e.g. two user sessions racing) never overwrites a
-        # newer one, so selection and the appliance stay convergent.
+        # Same monotonicity the appliance enforces, so a stale declaration never overwrites a newer one.
         current = db.get_availability(ven)
         if current and current.get("version") \
                 and calendar["version"] <= current["version"]:
@@ -168,7 +141,7 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def _owner_proof(self, user_subject: str, body: dict):
-        """Registration: bind an appliance to the user authenticated here."""
+        """Bind an appliance to the user authenticated on this channel."""
         if db.get_user(user_subject) is None:
             return self._json(403, {"error": "valid platform certificate but not enrolled",
                                     "subject": user_subject})
@@ -179,8 +152,7 @@ class Handler(BaseHTTPRequestHandler):
         except owner_proof.InvalidOwnerProof as e:
             return self._json(400, {"error": str(e)})
 
-        # The ownership relation and the declared parameters are recorded; the
-        # proof signature has served its purpose and is not stored.
+        # Parameters come from the verified payload; the proof signature itself is not stored.
         db.add_appliance(
             bound["ven_subject"], bound["owner"], bound["cert_pem"],
             bound["nominal_power"], bound["max_curtail"], bound["recovery"],
@@ -196,14 +168,7 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def _dr_select(self, cert, subject: str, body: dict):
-        """Operational step 2: the DR operator requests a reduction; the VPP
-        selects the participants, or reports that it cannot be served.
-
-        The operator is recognised by the role attribute in its
-        certificate (OU=role=operator). PROTOTYPE LIMITATION: the RA currently
-        honours whatever subject a CSR asks for, so this role is not enforced at
-        issuance; a real deployment would have the RA validate role attributes.
-        """
+        """The DR operator requests a reduction; returns the selection or why it cannot be served."""
         if not self._is_operator(cert):
             return self._json(403, {"error": "only the DR operator may request a "
                                              "reduction", "subject": subject})
@@ -219,23 +184,13 @@ class Handler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _is_operator(cert) -> bool:
-        """The DR operator is recognised by a role attribute in its certificate.
-
-        PROTOTYPE LIMITATION: the RA honours whatever subject a CSR asks for, so
-        the role is not enforced at issuance; a real deployment would have the RA
-        validate role attributes before signing.
-        """
+        """Role attribute OU=role=operator. Prototype limitation: the RA does not validate it at issuance."""
         roles = [a.value for a in cert.subject.get_attributes_for_oid(
             NameOID.ORGANIZATIONAL_UNIT_NAME)]
         return "role=operator" in roles
 
     def _openadr_poll(self, ven_subject: str):
-        """The appliance retrieves its pending activations (OpenADR pull model).
-
-        The channel already authenticated both ends, so the appliance knows the
-        activation comes from the legitimate VPP. The random activation
-        identifier is what protects it once it has left the channel.
-        """
+        """OpenADR pull: the appliance retrieves its pending activations, calendar and CRL."""
         if db.get_registration(ven_subject) is None:
             return self._json(403, {"error": "appliance is not a registered VEN",
                                     "subject": ven_subject})
@@ -243,22 +198,14 @@ class Handler(BaseHTTPRequestHandler):
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         for activation in pending:
             db.mark_delivered(activation["activation_id"], now)
-        # The current owner-signed calendar rides along verbatim: the appliance
-        # verifies its signature and version itself (the VPP only relays it).
+        # Calendar and CRL ride along verbatim: the appliance verifies both itself.
         declared = db.get_availability(ven_subject)
         return self._json(200, {"ven": ven_subject, "activations": pending,
                                 "calendar": declared.get("jws") if declared else None,
-                                # The CA's revocation list, relayed the same way.
                                 "crl": db.get_crl()})
 
     def _dr_activate(self, cert, subject: str, body: dict):
-        """Operational step 3: issue activations to the selected appliances.
-
-        Selection runs first; if the request cannot be served nothing is
-        activated (409). Each activation carries a random 128-bit identifier,
-        which is what stops a captured activation from being replayed once it
-        has left the channel, and what the evidence later has to name.
-        """
+        """Issue activations to the selected appliances; the random id is what the evidence must name."""
         if not self._is_operator(cert):
             return self._json(403, {"error": "only the DR operator may activate"})
         action = body.get("action", "reduce")
@@ -301,7 +248,7 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def _evidence(self, ven_subject: str, body: dict):
-        """Operational step 4: the appliance submits signed participation evidence."""
+        """The appliance submits signed participation evidence."""
         try:
             verified = evidence.verify(body.get("evidence", ""), ven_subject)
         except evidence.DuplicateEvidence as e:
@@ -309,7 +256,7 @@ class Handler(BaseHTTPRequestHandler):
         except evidence.InvalidEvidence as e:
             return self._json(400, {"error": str(e)})
 
-        # The signature is kept verbatim: it IS the auditable record.
+        # The signed JWS is kept verbatim: it is the auditable record.
         db.add_evidence(
             verified["activation_id"], verified["ven_subject"],
             verified["executed_at"], verified["reduction_pct"],
@@ -319,11 +266,10 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {"status": "verified", **verified})
 
     def _openadr_register(self, cert, subject: str, body: dict):
-        """OpenADR EiRegisterParty (step 8c): the VEN registers with the VTN."""
+        """OpenADR EiRegisterParty: the VEN registers with the VTN."""
         cn = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
         ven_cn = cn[0].value if cn else subject
 
-        # oadrCreatePartyRegistration -> oadrCreatedPartyRegistration
         existing = db.get_registration(subject)
         if existing:
             ven_id, reg_id = existing["ven_id"], existing["registration_id"]
@@ -352,16 +298,16 @@ class QuietServer(ThreadingHTTPServer):
     daemon_threads = True
 
     def handle_error(self, request, client_address):
-        pass  # ignore TLS handshake failures (clients without a valid cert)
+        pass  # clients without a valid certificate fail the handshake
 
 
 def main():
     db.initialize()
-    crypto_service.initialize()  # loads the VPP identity + the CA root
+    crypto_service.initialize()
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(str(CERTS / "vpp.crt"), str(CERTS / "vpp.key"))
     ctx.load_verify_locations(str(CERTS / "CA.crt"))
-    ctx.verify_mode = ssl.CERT_REQUIRED  # mutual TLS: client MUST present a cert
+    ctx.verify_mode = ssl.CERT_REQUIRED
     httpd = QuietServer((HOST, PORT), Handler)
     httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
     print(f"[vpp-mtls] mutual-TLS session endpoint on https://{HOST}:{PORT} "

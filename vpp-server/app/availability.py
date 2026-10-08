@@ -44,11 +44,7 @@ def validate(slots: dict) -> dict:
 
 
 def verify_signed(jws_token: str, expected_owner: str) -> dict:
-    """Verify an owner-signed calendar: signature, signer, version, bitmaps.
-
-    Returns {"slots", "version"}. Monotonicity against the stored version is
-    the caller's check at the VPP, and the appliance's own check at the edge.
-    """
+    """Verify an owner-signed calendar and return {"slots", "version"}; the caller checks monotonicity."""
     try:
         header = jwt.get_unverified_header(jws_token)
         owner_cert = x509.load_der_x509_certificate(
@@ -62,7 +58,7 @@ def verify_signed(jws_token: str, expected_owner: str) -> dict:
     owner_pub = owner_cert.public_key().public_bytes(
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
     try:
-        # ES256 = Android Keystore EC credential, RS256 = JVM/software keys
+        # ES256 for Android Keystore EC keys, RS256 for software keys.
         payload = jwt.decode(jws_token, owner_pub, algorithms=["RS256", "ES256"])
     except Exception as e:
         raise InvalidAvailability(f"calendar signature invalid: {e}")

@@ -11,11 +11,10 @@ sys.path.insert(0, str(ROOT / "vpp-server"))
 from app import availability as av  # noqa: E402
 from app import db  # noqa: E402
 
-SYN_PREFIX = "CN=syn-"          # marks every synthetic subject in the DB
+SYN_PREFIX = "CN=syn-"
 SYN_USER_PREFIX = "CN=syn-user-"
 
-# Appliance types: nominal power range (W, in steps of 50) and the fixed
-# operational constraints max (min of curtailment) and rec (min of recovery).
+# power: nominal range in W; max: minutes of curtailment; rec: minutes of recovery.
 TYPES = {
     "ac":       {"power": (1800, 2400), "max": 120, "rec": 30},
     "fridge":   {"power": (150, 300),   "max": 30,  "rec": 90},
@@ -23,7 +22,7 @@ TYPES = {
     "heatpump": {"power": (900, 1600),  "max": 90,  "rec": 45},
 }
 
-# Availability profiles: which days and which hour range the owner authorises.
+# (days, start hour, end hour) the owner authorises.
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri")
 WEEKEND = ("sat", "sun")
 PROFILES = {
@@ -91,9 +90,7 @@ def generate(users: int = 20, seed: int = 42) -> dict:
     return {"users": users, "appliances": n_appliances, "seed": seed}
 
 
-# ------------------------------------------------------------------ export ---
 def export_doc() -> dict:
-    """The synthetic population as a JSON-serialisable document."""
     with sqlite3.connect(db.DB_FILE) as c:
         rows = c.execute(
             """SELECT a.ven_subject, a.owner, a.nominal_power, a.max_curtail,
@@ -137,9 +134,7 @@ def import_doc(doc: dict) -> dict:
     return {"users": n_users, "appliances": n_appliances}
 
 
-# ------------------------------------------------------------------- views ---
 def view_appliances() -> str:
-    """View 1: every appliance's declared power and operational parameters."""
     with sqlite3.connect(db.DB_FILE) as c:
         rows = c.execute(
             """SELECT a.ven_subject, a.owner, a.nominal_power, a.max_curtail,
@@ -163,7 +158,7 @@ def view_appliances() -> str:
 
 
 def aggregate_data(day: str) -> list[dict]:
-    """View 2 data: available power and appliance count per slot of one day."""
+    """Available power and appliance count per slot of one day."""
     if day not in av.DAYS:
         raise ValueError(f"unknown day {day!r}")
     fleet = db.list_appliances_for_selection()
@@ -179,7 +174,7 @@ def aggregate_data(day: str) -> list[dict]:
 
 
 def view_aggregate(day: str) -> str:
-    """View 2: aggregated availability per time slot, as a bar chart."""
+    """Aggregated availability per slot, as a text bar chart."""
     data = aggregate_data(day)
     peak = max((d["power_w"] for d in data), default=0)
     lines = [f"aggregated available power per slot - {day} "
@@ -191,7 +186,6 @@ def view_aggregate(day: str) -> str:
     return "\n".join(lines)
 
 
-# --------------------------------------------------------------------- cli ---
 def main() -> None:
     parser = argparse.ArgumentParser(description="Backoffice - synthetic population for the aggregation demo.")
     sub = parser.add_subparsers(dest="command", required=True)

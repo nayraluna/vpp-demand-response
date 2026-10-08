@@ -1,6 +1,6 @@
 import base64
 
-import jwt  # PyJWT
+import jwt
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
@@ -16,7 +16,7 @@ class DuplicateEvidence(Exception):
 
 
 def verify(jws_token: str, submitter_subject: str) -> dict:
-    """Verify evidence submitted by `submitter_subject` (its mTLS identity)."""
+    """Verify the evidence and return its fields; `submitter_subject` is the mTLS identity."""
     try:
         header = jwt.get_unverified_header(jws_token)
     except Exception as e:
@@ -26,13 +26,11 @@ def verify(jws_token: str, submitter_subject: str) -> dict:
         raise InvalidEvidence("evidence carries no appliance certificate (x5c)")
     ven_cert = x509.load_der_x509_certificate(base64.b64decode(x5c[0]))
 
-    # (1) the signing appliance must be certified by the CA
     if not crypto_service.issued_by_ca(ven_cert):
         raise InvalidEvidence("appliance certificate not issued by the CA")
     if not crypto_service.within_validity(ven_cert):
         raise InvalidEvidence("appliance certificate expired or not yet valid")
 
-    # (2) the signature must verify under that certified key
     ven_pub = ven_cert.public_key().public_bytes(
         serialization.Encoding.PEM,
         serialization.PublicFormat.SubjectPublicKeyInfo,
@@ -42,13 +40,11 @@ def verify(jws_token: str, submitter_subject: str) -> dict:
     except Exception as e:
         raise InvalidEvidence(f"appliance signature invalid: {e}")
 
-    # (3) the signer must be the appliance that opened this channel
     ven_subject = ven_cert.subject.rfc4514_string()
     if ven_subject != submitter_subject:
         raise InvalidEvidence(
             f"evidence signed by {ven_subject} but submitted by {submitter_subject}")
 
-    # (4) it must refer to an activation actually issued to that appliance
     activation_id = payload.get("activation_id")
     activation = db.get_activation(activation_id) if activation_id else None
     if activation is None:
@@ -56,7 +52,6 @@ def verify(jws_token: str, submitter_subject: str) -> dict:
     if activation["ven_subject"] != ven_subject:
         raise InvalidEvidence("activation was issued to a different appliance")
 
-    # (5) one execution may only be claimed once
     if db.get_evidence(activation_id) is not None:
         raise DuplicateEvidence(
             f"evidence for {activation_id} was already accepted")

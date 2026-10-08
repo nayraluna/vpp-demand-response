@@ -19,7 +19,7 @@ class InvalidBundle(Exception):
 
 
 class AlreadyPaired(Exception):
-    """The appliance is already configured (state 1); a factory reset is required."""
+    """Already in state 1, a factory reset is required first."""
 
 
 def _issued_by(cert: x509.Certificate, issuer: x509.Certificate) -> bool:
@@ -30,15 +30,12 @@ def _issued_by(cert: x509.Certificate, issuer: x509.Certificate) -> bool:
         )
         return True
     except Exception:
-        # Fail closed: a bad signature, a foreign signature scheme, or a
-        # malformed certificate all mean "not issued by this issuer".
+        # Fail closed: any verification error means "not issued by this issuer".
         return False
 
 
 def _within_validity(cert: x509.Certificate) -> bool:
-    """The signature proves the CA issued it, not that it is still current.
-    An expired certificate also leaves the revocation list, so this is what
-    keeps a withdrawn credential refused after its own expiry date."""
+    """Expired certificates drop off the CRL, so this keeps a withdrawn credential refused past its expiry."""
     now = datetime.datetime.now(datetime.timezone.utc)
     return cert.not_valid_before_utc <= now <= cert.not_valid_after_utc
 
@@ -48,7 +45,6 @@ def pair(jws_token: str) -> dict:
     if cfg["state"] != 0:
         raise AlreadyPaired(f"appliance already paired with {cfg['owner']}")
 
-    # 1. The owner certificate travels in the x5c header of the bundle.
     try:
         header = jwt.get_unverified_header(jws_token)
     except Exception as e:
@@ -58,10 +54,6 @@ def pair(jws_token: str) -> dict:
         raise InvalidBundle("bundle has no owner certificate (x5c)")
     owner = x509.load_der_x509_certificate(base64.b64decode(x5c[0]))
 
-    # 2. Verify the owner's signature over the payload. Users sign ES256
-    #    (Android Keystore EC credential) or RS256 (JVM tests, software keys);
-    #    the key type in the x5c certificate must match the declared alg,
-    #    which PyJWT enforces.
     owner_pub = owner.public_key().public_bytes(
         serialization.Encoding.PEM,
         serialization.PublicFormat.SubjectPublicKeyInfo,
@@ -71,11 +63,8 @@ def pair(jws_token: str) -> dict:
     except Exception as e:
         raise InvalidBundle(f"owner signature invalid: {e}")
 
-    # 3. The owner and the VPP must both be certified by the root this device
-    #    left the factory with. A `cert_ra` field in the bundle, if any, is
-    #    ignored: a trust anchor received over the channel it is meant to
-    #    protect would let anyone on the LAN enrol an unpaired appliance into a
-    #    VPP of their own, with a root of their own.
+    # Any cert_ra in the bundle is ignored: a root received over the channel it protects
+    # would let anyone on the LAN enrol an unpaired appliance into a VPP of their own.
     root = hsm.trust_anchor()
     try:
         cert_vpp = x509.load_pem_x509_certificate(payload["cert_vpp"].encode())
@@ -90,9 +79,6 @@ def pair(jws_token: str) -> dict:
     if not _within_validity(cert_vpp):
         raise InvalidBundle("VPP certificate expired or not yet valid")
 
-    # 4. Store the configuration and leave pairing mode (state 0 -> 1). The
-    # trust anchor for every later call to the VPP is the factory root itself.
-    # The VPP certificate is kept because it was verified against that root.
     owner_subject = owner.subject.rfc4514_string()
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     here = Path(__file__).resolve().parent.parent
@@ -109,10 +95,9 @@ def pair(jws_token: str) -> dict:
     })
     device_config.save(cfg)
 
-    # 5. Report our capabilities and produce the owner proof, signed in the HSM.
     parameters = {
-        "P": hsm.nominal_power(),   # certified by the CA in the cert
-        "max": cfg["max"],          # device property, from the config file
+        "P": hsm.nominal_power(),   # certified by the CA, not self-declared
+        "max": cfg["max"],
         "rec": cfg["rec"],
     }
     owner_proof = hsm.sign_jws({

@@ -1,17 +1,6 @@
-"""Build the whole development PKI the way a deployment would, one component at
-a time: each one generates its own key pair and a CSR, the CA signs the CSR
-offline, and the component installs what it gets back. Private keys never
-travel, CSRs and certificates do.
+"""Build the development PKI: each component makes its own key and CSR, the CA signs offline.
 
     python provision_all.py [--algo rsa|ec] [--san 192.168.1.50,...]
-
-EXTRA_SAN_IPS is honoured too, so a phone or a Raspberry Pi can reach the TLS
-endpoints by this machine's address. Everything lands in certs/ under the names
-the services, the gates and the Android project already use.
-
-Re-running this creates a new root, so the Android app's bundled copy of
-CA.crt, the operator credential and anything deployed on a Pi have to be
-refreshed afterwards (see the appendix of RUNBOOK.md).
 """
 import argparse
 import os

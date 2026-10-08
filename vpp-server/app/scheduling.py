@@ -69,7 +69,6 @@ def select(power_w: int, day: str, slot_start: int, slot_end: int,
         result.update({"selected": selected, "aggregated_power": aggregated,
                        "appliance_count": len(selected)})
     else:
-        # Nothing is activated: the request cannot be served.
         offered = sum(a["nominal_power"] for a in eligible)
         result.update({"selected": [], "aggregated_power": 0,
                        "appliance_count": 0, "available_power": offered,

@@ -25,18 +25,12 @@ def ping() -> dict:
 
 
 class EnrollRequest(BaseModel):
-    certificate: str  # the user's certificate (PEM), issued by the RA
+    certificate: str  # PEM issued by the RA
 
 
 @app.post("/enroll")
 def enroll(req: EnrollRequest) -> dict:
-    """Step 8a - App->VPP: create a user account.
-
-    First contact is over normal TLS; the user presents the certificate the RA
-    issued for them. The VPP accepts it only if the CA signed it, stores the
-    account, and returns Cert_VPP. From here on the user authenticates over
-    mutual TLS with this same certificate.
-    """
+    """Create the account for a CA-issued certificate; later requests use it over mTLS."""
     try:
         cert = x509.load_pem_x509_certificate(req.certificate.encode())
     except Exception:
@@ -55,9 +49,7 @@ def enroll(req: EnrollRequest) -> dict:
     existing = db.get_user(subject)
     already = existing is not None
     if already and existing["cert_pem"] != req.certificate:
-        # The account belongs to the certificate it was enrolled with. A
-        # different one may take it over only once the CA has withdrawn the
-        # old one (a renewal supersedes it) or it has expired on its own.
+        # Another certificate may take the account only once the old one is revoked or expired.
         old = x509.load_pem_x509_certificate(existing["cert_pem"].encode())
         try:
             if crypto_service.within_validity(old) and not revocation.is_revoked(old):

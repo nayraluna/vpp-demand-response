@@ -14,9 +14,7 @@ from . import db
 CERTS_DIR = Path(__file__).resolve().parent.parent.parent / "certs"
 CA_CERT_FILE = CERTS_DIR / "CA.crt"
 
-# Where the list comes from, and how old a cached copy may get before the next
-# check refreshes it. run_all.ps1 sets the age to 0 so every gate sees a
-# revocation the moment it happens. Interactive runs keep the default.
+# Seconds a cached list may age before refresh; run_all.ps1 sets 0 so gates see revocations at once.
 CA_URL = os.environ.get("TFG_CA_URL", "https://127.0.0.1:8081")
 MAX_AGE = float(os.environ.get("TFG_CRL_MAX_AGE", "300"))
 
@@ -43,18 +41,11 @@ def _fetch() -> tuple[str, dict]:
     r = requests.get(f"{CA_URL}/ra/crl", verify=str(CA_CERT_FILE), timeout=5)
     r.raise_for_status()
     token = r.json()["crl"]
-    # The CA signs the list with its own key, and CA.crt is already this
-    # service's trust anchor, so the signature is checked straight against it.
     return token, jwt.decode(token, _anchor(), algorithms=["RS256"])
 
 
 def _discard_relay_copy_if_foreign() -> None:
-    """Once per process, before the first fetch. The relay copy only ever moves
-    to a higher list number, which is right while the CA stays the same and
-    wrong the moment the root is regenerated: the old list would then sit at a
-    number the new CA takes months to reach, and the appliance would be handed
-    a list that no longer chains. A copy that does not verify against the
-    current root is not a list at all, so it is dropped."""
+    """After a CA root regeneration the stored list no longer chains and its number would block newer ones."""
     stored = db.get_crl()
     if stored is None:
         return
@@ -73,13 +64,7 @@ def _expired(crl: dict) -> bool:
 
 
 def current() -> dict:
-    """The verified list, refreshed once the cached copy is older than MAX_AGE.
-
-    A refresh that fails keeps the last good copy, because a stale list is
-    still a signed statement by the CA, but only for as long as the CA said
-    it would stand. Past its next_update, or when no list was ever obtained,
-    this refuses to answer and callers fail closed, the same rule the
-    appliance applies to its own copy."""
+    """The verified list, refreshed after MAX_AGE; refuses past next_update so callers fail closed."""
     global _crl, _fetched_at
     with _lock:
         if _crl is None:
@@ -87,12 +72,10 @@ def current() -> dict:
         if _crl is None or time.monotonic() - _fetched_at > MAX_AGE:
             try:
                 token, fresh = _fetch()
-                # The CA never goes backwards. If this copy is older than the
-                # one we hold, something in between is replaying, keep ours.
+                # A lower crl_number than the one held means a replay: keep ours.
                 if _crl is None or fresh["crl_number"] >= _crl["crl_number"]:
                     _crl = fresh
-                    # The appliance gets this same signed list in its poll and
-                    # verifies it itself, so the relay copy is kept verbatim.
+                    # Kept verbatim: the appliance verifies this same signed list itself.
                     db.store_crl(token, fresh["crl_number"],
                                  datetime.datetime.now(datetime.timezone.utc).isoformat())
             except Exception:

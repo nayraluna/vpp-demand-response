@@ -1,6 +1,6 @@
 import base64
 
-import jwt  # PyJWT
+import jwt
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import NameOID
@@ -28,7 +28,7 @@ def certified_nominal_power(certificate: x509.Certificate) -> int:
 
 
 def verify(jws_token: str, authenticated_user: str) -> dict:
-    """Verify an owner proof presented by `authenticated_user` (mTLS identity)."""
+    """Verify the proof and return the binding; `authenticated_user` is the mTLS identity."""
     try:
         header = jwt.get_unverified_header(jws_token)
     except Exception as e:
@@ -38,13 +38,11 @@ def verify(jws_token: str, authenticated_user: str) -> dict:
         raise InvalidOwnerProof("owner proof carries no appliance certificate (x5c)")
     ven_cert = x509.load_der_x509_certificate(base64.b64decode(x5c[0]))
 
-    # (1) the appliance certificate must have been issued by the CA
     if not crypto_service.issued_by_ca(ven_cert):
         raise InvalidOwnerProof("appliance certificate not issued by the CA")
     if not crypto_service.within_validity(ven_cert):
         raise InvalidOwnerProof("appliance certificate expired or not yet valid")
 
-    # (2) the signature must verify with the certified public key
     ven_pub = ven_cert.public_key().public_bytes(
         serialization.Encoding.PEM,
         serialization.PublicFormat.SubjectPublicKeyInfo,
@@ -54,7 +52,6 @@ def verify(jws_token: str, authenticated_user: str) -> dict:
     except Exception as e:
         raise InvalidOwnerProof(f"appliance signature invalid: {e}")
 
-    # (3) the declared power must match the one certified in the certificate
     certified_power = certified_nominal_power(ven_cert)
     if payload.get("P") != certified_power:
         raise InvalidOwnerProof(
@@ -62,7 +59,6 @@ def verify(jws_token: str, authenticated_user: str) -> dict:
             f"{certified_power}"
         )
 
-    # (4) the proof must name the user authenticated on this channel
     if payload.get("owner") != authenticated_user:
         raise OwnershipMismatch(
             f"proof binds the appliance to {payload.get('owner')}, "

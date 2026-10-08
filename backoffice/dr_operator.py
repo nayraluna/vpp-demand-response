@@ -22,14 +22,7 @@ CRT_FILE = Path(__file__).resolve().parent / "operator.crt"
 
 
 def init_credential(force: bool = False) -> tuple[str, str]:
-    """Issue (or reuse) the operator credential: a certificate whose subject
-    carries OU=role=operator. The private key never leaves this machine.
-
-    With `force` and a credential already on disk this is a renewal: the
-    current credential signs the request for the new key and is superseded.
-    The CA issues one live certificate per subject, so a plain re-issue
-    would be refused while the old one still stands. A credential from a
-    root that is no longer the CA's cannot renew anything and is replaced."""
+    """Issue or reuse the operator credential; `force` renews it, or replaces it if its root is gone."""
     have = KEY_FILE.exists() and CRT_FILE.exists()
     if have and not force:
         return str(CRT_FILE), str(KEY_FILE)
@@ -76,8 +69,7 @@ def _chains_to_current_root(cert: x509.Certificate) -> bool:
 
 
 def _sign_as_operator(payload: dict, typ: str) -> str:
-    """A JWS carrying the operator certificate in x5c, so a listener without
-    client certificates (the CA) can still tell who is asking."""
+    """A JWS carrying the operator certificate in x5c, so the CA, which has no client certificates, knows who asks."""
     crt, key = init_credential()
     cert = x509.load_pem_x509_certificate(Path(crt).read_bytes())
     x5c = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode()

@@ -19,14 +19,13 @@ from . import activation_service, pairing_service  # noqa: E402
 
 
 def _poll_loop() -> None:
-    """Periodic outbound polling (design: 'periodic polling of the VTN')."""
     while True:
         override = os.environ.get("TFG_POLL_SECONDS")
         interval = int(override) if override else activation_service.poll_seconds()
         time.sleep(interval)
         try:
             outcome = activation_service.run_cycle()
-        except Exception as e:  # VPP unreachable, etc.: keep polling
+        except Exception as e:  # VPP unreachable: keep polling
             print(f"[appliance] poll cycle failed: {e}")
             continue
         calendar = outcome.get("calendar") if outcome else None
@@ -65,7 +64,7 @@ PAIRING_PORT = 8082  # must match the port this service is started on
 
 
 def _local_ip() -> str:
-    """The appliance's own address on the home network (no packet is sent)."""
+    """Own address on the home network, the UDP connect sends no packet."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("8.8.8.8", 80))
@@ -76,19 +75,17 @@ def _local_ip() -> str:
 
 @app.get("/qr")
 def pairing_qr() -> Response:
-    """The QR that in production is printed on the appliance: it encodes how to
-    reach this pairing interface over the home network, so the user never types
-    addresses (requirement U2). The prototype has the appliance serve it."""
+    """The QR printed on the appliance in production: how to reach this pairing interface."""
     url = f"http://{_local_ip()}:{PAIRING_PORT}"
     buf = io.BytesIO()
-    # border=4 is the quiet zone the QR standard requires; scanners rely on it.
+    # border=4 is the quiet zone scanners rely on
     segno.make(url, error="m").save(buf, kind="png", scale=8, border=4)
     return Response(content=buf.getvalue(), media_type="image/png",
                     headers={"X-Pairing-Url": url})
 
 
 class PairRequest(BaseModel):
-    jws: str  # compact JWS: the user-signed onboarding bundle
+    jws: str  # the user-signed onboarding bundle
 
 
 @app.post("/pair")
@@ -113,7 +110,7 @@ def factory_reset() -> dict:
 
 @app.post("/poll")
 def poll() -> dict:
-    """Poll the VPP for activations and act on them (operational step 3)."""
+    """Poll the VPP and act on its activations."""
     try:
         return activation_service.poll_and_process()
     except activation_service.NotConfigured as e:
@@ -122,7 +119,6 @@ def poll() -> dict:
 
 @app.post("/evidence")
 def submit_evidence() -> dict:
-    """Sign in the HSM and submit evidence of the curtailments performed."""
     try:
         return activation_service.submit_evidence()
     except activation_service.NotConfigured as e:

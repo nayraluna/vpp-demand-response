@@ -22,8 +22,7 @@ DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 DEFAULT_POLL_SECONDS = 60
 
-# The periodic poll loop and the HTTP handlers run in different threads but
-# share config.json (read-modify-write); one lock serialises every cycle.
+# The poll loop and the HTTP handlers share config.json, one lock serialises every cycle.
 _lock = threading.Lock()
 
 
@@ -32,14 +31,8 @@ class NotConfigured(Exception):
 
 
 def _adopt_crl(jws_token: str, cfg: dict) -> dict:
-    """Verify and adopt the CA's revocation list relayed by the VTN.
-
-    Same shape as the calendar: the VPP only relays it, the appliance trusts
-    the CA's signature, checked against its factory root, and accepts only a
-    list numbered at or above the one it holds. A VPP that
-    serves an older list to hide a revocation is refused by the device itself.
-    The caller persists cfg.
-    """
+    """Adopt the CA-signed revocation list the VTN relays. The number must not go
+    backwards, or a VPP could serve an older list to hide a revocation."""
     try:
         root = hsm.trust_anchor()
     except Exception as e:
@@ -62,8 +55,7 @@ def _adopt_crl(jws_token: str, cfg: dict) -> dict:
     if not isinstance(revoked, list) or not payload.get("next_update"):
         return {"status": "refused", "reason": "revocation list is malformed"}
 
-    # Equal numbers still refresh next_update: the CA re-signs the same list
-    # with a new validity window on every publication.
+    # An equal number still refreshes next_update: the CA re-signs the same list with a new window.
     cfg["crl_number"] = number
     cfg["crl_next_update"] = payload["next_update"]
     cfg["crl_revoked"] = [e.get("serial") for e in revoked]
@@ -72,32 +64,21 @@ def _adopt_crl(jws_token: str, cfg: dict) -> dict:
 
 
 def _adopt_calendar(jws_token: str, cfg: dict) -> dict:
-    """Verify and adopt the owner-signed calendar relayed by the VTN.
-
-    The VPP relays the calendar verbatim inside the poll response; the
-    appliance trusts only the owner's signature on it -- made by a key whose
-    certificate chains to the CA root recorded at pairing -- and accepts only
-    a version strictly greater than the one it holds. A misbehaving VPP can
-    therefore neither alter the calendar (it cannot produce the owner's
-    signature) nor roll it back to an older, more permissive one (the
-    monotonic version refuses the replay). The caller persists cfg.
-    """
+    """Adopt the owner-signed calendar the VTN relays: only the owner's signature is
+    trusted and the version must increase, so the VPP can neither alter nor roll it back."""
     try:
         header = jwt.get_unverified_header(jws_token)
         owner = x509.load_der_x509_certificate(base64.b64decode(header["x5c"][0]))
         owner_pub = owner.public_key().public_bytes(
             serialization.Encoding.PEM,
             serialization.PublicFormat.SubjectPublicKeyInfo)
-        # ES256 = Android Keystore EC credential; RS256 = JVM/software keys.
         payload = jwt.decode(jws_token, owner_pub, algorithms=["RS256", "ES256"])
     except Exception as e:
         return {"status": "refused",
                 "reason": f"unsigned or malformed calendar: {e}"}
 
-    # The signer's certificate must chain to the factory root. Matching the
-    # owner's NAME is not enough: without this check anyone, the VPP included,
-    # could mint a self-signed certificate bearing the owner's subject and have
-    # a forged or rolled-back calendar accepted.
+    # The signer must chain to the factory root. Matching the owner's name alone would let
+    # anyone, the VPP included, mint a self-signed certificate with that subject.
     try:
         root = hsm.trust_anchor()
     except Exception as e:
@@ -109,21 +90,16 @@ def _adopt_calendar(jws_token: str, cfg: dict) -> dict:
         return {"status": "refused",
                 "reason": "calendar signer certificate expired or not yet valid"}
 
-    # A signer the CA has since withdrawn is refused even though its signature
-    # still verifies: the list adopted earlier in this same poll decides.
+    # A withdrawn signer still verifies, the list adopted earlier in this poll decides.
     if format(owner.serial_number, "x") in (cfg.get("crl_revoked") or []):
         return {"status": "refused",
                 "reason": "calendar signer certificate is revoked"}
 
-    # Only the owner recorded at pairing may set this appliance's availability.
     if owner.subject.rfc4514_string() != cfg["owner"]:
         return {"status": "refused",
                 "reason": "calendar not signed by the owner of this appliance"}
 
-    # This signer is the owner, chains to the CA and is not revoked, so it is
-    # the owner's CURRENT certificate. Remember its serial: after a renewal the
-    # old one lands in the CRL as superseded, and the owner stays recognised
-    # through the calendar they sign with the new key.
+    # Remember the current serial: after a renewal the old one lands in the CRL as superseded.
     cfg["owner_serial"] = format(owner.serial_number, "x")
 
     version = payload.get("version")
@@ -132,7 +108,6 @@ def _adopt_calendar(jws_token: str, cfg: dict) -> dict:
         return {"status": "refused",
                 "reason": "calendar carries no valid version"}
     if version == stored:
-        # Steady state: the VTN re-delivers the current calendar every poll.
         return {"status": "current", "version": version}
     if version < stored:
         return {"status": "refused",
@@ -165,10 +140,7 @@ def _check(activation: dict, cfg: dict, now: datetime.datetime) -> str | None:
     if activation["activation_id"] in cfg["processed"]:
         return "activation already processed (replay)"
 
-    # Fail closed on revocation. Without a list that is still inside its
-    # validity window the appliance cannot know whether the parties it relies
-    # on are still trusted, so it does not act. The owner's calendar is still
-    # honoured, so refusing costs the user nothing.
+    # Fail closed: without a revocation list still inside its window the appliance does not act.
     next_update = cfg.get("crl_next_update")
     if not next_update:
         return "no revocation list adopted yet"
@@ -187,10 +159,7 @@ def _check(activation: dict, cfg: dict, now: datetime.datetime) -> str | None:
     if not all(c == "1" for c in calendar.get(day, "")[start:end]):
         return "interval outside the availability declared by the owner"
 
-    # The curtailment must happen WHEN the activation says: the wall clock
-    # (UTC, as everywhere in the platform) must be inside the activated day and
-    # slot window. A delivered-late or premature activation is refused, never
-    # executed at some other time than its owner-visible window.
+    # Only inside the activated window (UTC): a late or early delivery is refused, never run at another time.
     today = DAYS[now.weekday()]
     if day != today:
         return f"activation is for {day}; today is {today}"
@@ -220,12 +189,7 @@ def _ven_identity() -> tuple[str, str]:
 
 
 def _ensure_registered(cfg: dict) -> None:
-    """Register with the VTN (OpenADR EiRegisterParty) if not done yet.
-
-    This is the appliance's own outbound completion of the registration phase:
-    no external party triggers it. Idempotent at the VTN, so a lost local
-    config simply re-obtains the same registration.
-    """
+    """Register with the VTN (OpenADR EiRegisterParty) once, idempotent at the VTN."""
     if cfg.get("registration"):
         return
     cn = next((p.split("=", 1)[1] for p in hsm.subject().split(",")
@@ -240,7 +204,6 @@ def _ensure_registered(cfg: dict) -> None:
     cfg["registration"] = {
         "ven_id": response.get("venID"),
         "registration_id": response.get("registrationID"),
-        # The VTN states how often it wants to be polled; honour it.
         "poll_seconds": int(requested.group(1)) if requested
         else DEFAULT_POLL_SECONDS,
     }
@@ -248,13 +211,11 @@ def _ensure_registered(cfg: dict) -> None:
 
 
 def poll_seconds() -> int:
-    """The polling period requested by the VTN at registration (with default)."""
     registration = device_config.load().get("registration") or {}
     return registration.get("poll_seconds") or DEFAULT_POLL_SECONDS
 
 
 def poll_and_process() -> dict:
-    """Poll the VPP and act on whatever it has for us."""
     with _lock:
         return _poll_and_process()
 
@@ -264,23 +225,18 @@ def _poll_and_process() -> dict:
     if cfg["state"] != 1:
         raise NotConfigured("appliance is not paired yet")
 
-    # Complete the registration phase before the first pull, autonomously.
     _ensure_registered(cfg)
 
     body = vtn_client.poll(
         cfg["vpp_mtls_url"], str(hsm.CA_FILE), *_ven_identity(),
     )
 
-    # The revocation list comes first: the calendar adopted right after is
-    # judged against it, so a calendar from a just-revoked owner is refused in
-    # the same pull that announced the revocation.
+    # Revocation list first: the calendar adopted next is judged against it.
     crl = None
     if body.get("crl"):
         crl = _adopt_crl(body["crl"], cfg)
 
-    # The owner-signed calendar rides in the poll response; adopt it BEFORE
-    # checking activations, so the same pull that delivers a new calendar has
-    # its activations judged against the owner's latest declaration.
+    # Calendar before activations, so this pull's activations are judged against the latest one.
     calendar = None
     if body.get("calendar"):
         calendar = _adopt_calendar(body["calendar"], cfg)
@@ -290,17 +246,14 @@ def _poll_and_process() -> dict:
     executed, refused = [], []
     for activation in activations:
         reason = _check(activation, cfg, now)
-        # Seen once, never accepted twice - even if we refuse it.
+        # Marked processed even when refused: never accepted twice.
         cfg["processed"].append(activation["activation_id"])
         if reason:
             refused.append({"activation_id": activation["activation_id"],
                             "reason": reason})
             continue
 
-        # The curtailment runs from now (we are inside the window, _check
-        # guarantees it) until the END of the activated window - never past
-        # what the owner-visible interval authorises. Recovery counts from
-        # that same instant.
+        # Runs until the end of the activated window, never past what the owner authorised.
         midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
         window_end = midnight + datetime.timedelta(
             minutes=activation["slot_end"] * SLOT_MINUTES)
@@ -312,8 +265,7 @@ def _poll_and_process() -> dict:
             "slot_end": activation["slot_end"],
             "executed_at": now.isoformat(),
             "ends_at": window_end.isoformat(),
-            # A real appliance measures this; the emulated one delivers what was
-            # asked: a full shutdown is 100%, a reduction is 50% of nominal power.
+            # Emulated: a real appliance measures this.
             "reduction_pct": 100 if activation["action"] == "shutdown" else 50,
         }
         cfg["last_activation"] = record
@@ -326,9 +278,7 @@ def _poll_and_process() -> dict:
 
 
 def run_cycle() -> dict | None:
-    """One tick of the periodic loop: register if needed, poll, act, testify.
-
-    Returns None while the appliance is unpaired (nothing to do)."""
+    """One tick of the periodic loop, None while unpaired."""
     if device_config.load()["state"] != 1:
         return None
     outcome = poll_and_process()
@@ -337,13 +287,7 @@ def run_cycle() -> dict | None:
 
 
 def submit_evidence() -> dict:
-    """Generate and submit evidence for every curtailment not yet reported.
-
-    The message is signed INSIDE THE HSM with the certified appliance key, so
-    only this appliance can produce valid evidence for its activations. It
-    records when the curtailment ran, which activation it answers, and the
-    reduction actually achieved as a percentage of the nominal power.
-    """
+    """Submit evidence for every curtailment not yet reported, signed in the HSM so only this appliance can produce it."""
     with _lock:
         return _submit_evidence()
 

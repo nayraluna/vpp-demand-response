@@ -1,13 +1,7 @@
-"""The factory step of an appliance. The signing key is generated inside the
-(emulated) HSM and never leaves it: only the CSR goes to the CA. What comes back
-is the certificate, carrying the nominal power the manufacturer vouches for in
-its subject, and the platform root the device will trust from then on.
+"""Factory step of an appliance: the key is generated in the HSM, only the CSR leaves it.
 
     python provision.py request [--ven ven-0001] [--power 2000] [--algo rsa|ec]
     python provision.py install <signed.crt> <root.crt>
-
-In the development layout the HSM is ../certs/, which is where hsm.py reads
-VEN.key, VEN.crt and the factory root CA.crt from.
 """
 import argparse
 import shutil
@@ -22,9 +16,7 @@ HSM = Path(__file__).resolve().parent.parent / "certs"
 
 
 def subject_for(ven: str, power: int) -> x509.Name:
-    # The nominal power rides in the subject as OU=P=<watts>. It is what the
-    # owner proof later has to match, and what stops an appliance from
-    # over-declaring its capacity.
+    # OU=P=<watts> is the certified nominal power, what stops an appliance over-declaring it.
     return x509.Name([
         x509.NameAttribute(NameOID.COMMON_NAME, ven),
         x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, f"P={power}"),

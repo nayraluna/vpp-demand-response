@@ -29,16 +29,14 @@ class AlreadyEnrolled(Exception):
 
 
 class InvalidRequest(Exception):
-    """A signed request (revocation, renewal) that is malformed, unsigned, or
-    signed by a certificate this CA does not stand behind any more."""
+    """A signed request that is malformed or signed by a certificate this CA no longer stands behind."""
 
 
 class NotOperator(Exception):
     """A valid platform identity, but not one allowed to revoke."""
 
 
-# How long a published list stays valid. A relying party whose copy is older
-# than this must refresh it, and refuses to act if it cannot.
+# A relying party whose copy is older than this must refresh it, and refuses to act if it cannot.
 CRL_VALIDITY = datetime.timedelta(hours=24)
 
 
@@ -63,21 +61,13 @@ def _public_key_id(public_key) -> str:
     return digest.finalize().hex()
 
 
-# What each kind of certificate is allowed to do. The requester never chooses
-# this: the profile is picked by the CA from the channel the request came in
-# on (the network endpoint issues clients, the offline tool issues the rest).
+# The profile is picked by the CA from the channel the request came in on, never by the requester.
 PROFILES = {
-    # Users, operators and appliances: they sign artefacts and authenticate as
-    # TLS clients. The default of the network endpoint.
     "client": {"key_encipherment": False,
                "eku": [x509.ExtendedKeyUsageOID.CLIENT_AUTH]},
-    # The CA's own TLS endpoint: a server and nothing else.
     "tls-server": {"key_encipherment": True,
                    "eku": [x509.ExtendedKeyUsageOID.SERVER_AUTH]},
-    # The VPP: one certificate per entity, as in the reference protocol. It
-    # serves TLS on two listeners, and the same key is provisioned for signing
-    # DR events (crypto_service.sign_jws), although no endpoint exercises that
-    # yet: activations rest on the mutual-TLS channel and a random identifier.
+    # The VPP: the same key is also provisioned for signing DR events.
     "tls-server+signing": {"key_encipherment": True,
                            "eku": [x509.ExtendedKeyUsageOID.SERVER_AUTH]},
 }
@@ -95,11 +85,7 @@ def _san(names: list[str]) -> x509.SubjectAlternativeName:
 
 def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
                    san: list[str] | None = None, supersedes: str | None = None) -> dict:
-    """Verify a CSR and issue a CA-signed leaf certificate for a platform identity.
-
-    `supersedes` names the serial this certificate replaces: a renewal. It is
-    revoked as superseded in the same act, so the subject never holds two
-    live certificates."""
+    """Verify a CSR and issue a leaf certificate; `supersedes` names the serial a renewal replaces."""
     if profile not in PROFILES:
         raise InvalidCSR(f"unknown certificate profile {profile!r}")
     if san and not profile.startswith("tls-server"):
@@ -110,8 +96,7 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
     except Exception as e:
         raise InvalidCSR(f"could not parse CSR: {e}")
 
-    # Proof of possession: the CSR must be signed by the private key matching the
-    # public key it carries. This is what makes a CSR trustworthy to the RA.
+    # Proof of possession: the CSR must be signed by the key it carries.
     if not csr.is_signature_valid:
         raise InvalidCSR("CSR self-signature does not verify")
 
@@ -121,10 +106,8 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
     if already:
         raise AlreadyEnrolled(f"public key already enrolled (serial {already})")
 
-    # One live certificate per subject. Possession of a key proves nothing
-    # about the name in the CSR, so without this a fresh key could be
-    # certified under an existing identity and step into its account at the
-    # VPP. Only the certificate a renewal says it replaces may be live here.
+    # Possession of a key proves nothing about the name in the CSR: without this a fresh key
+    # could be certified under an existing identity. Only the serial a renewal replaces may be live.
     now = datetime.datetime.now(datetime.timezone.utc)
     live = registry.live_serial_for_subject(csr.subject.rfc4514_string(), now)
     if live and live != supersedes:
@@ -133,8 +116,7 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
     serial = x509.random_serial_number()
     not_after = now + datetime.timedelta(days=days)
 
-    # Extensions are set by the CA from the profile, NOT copied from the CSR:
-    # the requester does not get to choose what its certificate is good for.
+    # Extensions come from the profile, never from the CSR: the requester does not choose its own usage.
     builder = (
         x509.CertificateBuilder()
         .subject_name(csr.subject)
@@ -188,12 +170,7 @@ def _issued_here(cert: x509.Certificate) -> bool:
 
 
 def _verify_signed_request(token: str) -> tuple[x509.Certificate, dict]:
-    """Common ground for every request the CA accepts over plain TLS: a JWS
-    whose x5c carries the requester's own certificate. The :8081 listener has
-    no client certificates, so the request must carry its own proof of who is
-    asking, the same way the pairing bundle and the calendar do. Checked in
-    order: the signer was issued here, is still within its validity, has not
-    been revoked, and the signature verifies against it."""
+    """Verify a JWS against the certificate in its x5c: issued here, within validity, not revoked."""
     try:
         header = jwt.get_unverified_header(token)
         signer = x509.load_der_x509_certificate(base64.b64decode(header["x5c"][0]))
@@ -231,12 +208,7 @@ def verify_revocation_request(token: str) -> dict:
 
 
 def renew_from_request(token: str) -> dict:
-    """Renewal is re-keying: the holder of a valid certificate signs a request
-    carrying a CSR for a NEW key pair, and receives a certificate with the same
-    subject. The old certificate is revoked as superseded in the same act, so
-    one identity never has two live certificates. A holder whose certificate
-    has expired or been revoked cannot renew and re-enrols from scratch, with
-    the identity proof, which is the right path for a lost credential."""
+    """Re-key: a valid holder signs a CSR for a new key, same subject; the old serial is superseded."""
     signer, payload = _verify_signed_request(token)
     csr_pem = payload.get("csr")
     if not isinstance(csr_pem, str):
@@ -258,10 +230,7 @@ def renew_from_request(token: str) -> dict:
 
 
 def crl_jws() -> str:
-    """The revocation list, signed with the CA key. Relying parties already hold
-    the CA certificate as their trust anchor, so they verify straight against it
-    and no x5c is needed. It carries this_update and next_update like an X.509
-    CRL, plus the monotonic crl_number so a stale list can be refused."""
+    """The revocation list signed with the CA key; relying parties hold the anchor, so no x5c."""
     now = datetime.datetime.now(datetime.timezone.utc)
     payload = {
         "issuer": _ca_cert.subject.rfc4514_string(),
