@@ -22,6 +22,12 @@ def initialize() -> None:
                    reason      TEXT)"""
         )
         c.execute("CREATE INDEX IF NOT EXISTS issued_key_id ON issued(key_id)")
+        # The register keeps what was issued and who withdrew it, not only that it happened.
+        for column in ("certificate TEXT", "profile TEXT", "revoked_by TEXT"):
+            try:
+                c.execute(f"ALTER TABLE issued ADD COLUMN {column}")
+            except sqlite3.OperationalError:
+                pass
         c.execute(
             """CREATE TABLE IF NOT EXISTS meta(
                    key   TEXT PRIMARY KEY,
@@ -30,13 +36,23 @@ def initialize() -> None:
 
 
 def record(serial: str, key_id: str, subject: str,
-           issued_at: datetime.datetime, not_after: datetime.datetime) -> None:
+           issued_at: datetime.datetime, not_after: datetime.datetime,
+           certificate: str, profile: str) -> None:
     with _conn() as c:
         c.execute(
-            "INSERT INTO issued(serial, key_id, subject, issued_at, not_after)"
-            " VALUES(?, ?, ?, ?, ?)",
-            (serial, key_id, subject, issued_at.isoformat(), not_after.isoformat()),
+            "INSERT INTO issued(serial, key_id, subject, issued_at, not_after, certificate, profile)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?)",
+            (serial, key_id, subject, issued_at.isoformat(), not_after.isoformat(),
+             certificate, profile),
         )
+
+
+def normalize_serial(text: str) -> str:
+    """Hex as every tool prints it: case, colons, spaces and leading zeros do not matter."""
+    s = text.strip().lower().replace(":", "").replace(" ", "")
+    s = s[2:] if s.startswith("0x") else s
+    int(s or "x", 16)
+    return s.lstrip("0") or "0"
 
 
 def serial_for_key(key_id: str) -> str | None:
@@ -61,24 +77,25 @@ def live_serial_for_subject(subject: str, now: datetime.datetime) -> str | None:
 def lookup(serial: str) -> dict | None:
     with _conn() as c:
         row = c.execute(
-            "SELECT serial, subject, not_after, revoked_at, reason FROM issued"
-            " WHERE serial=?", (serial,)
+            "SELECT serial, subject, not_after, revoked_at, reason, revoked_by, profile, certificate"
+            " FROM issued WHERE serial=?", (serial,)
         ).fetchone()
     if not row:
         return None
     return {"serial": row[0], "subject": row[1], "not_after": row[2],
-            "revoked_at": row[3], "reason": row[4]}
+            "revoked_at": row[3], "reason": row[4], "revoked_by": row[5],
+            "profile": row[6], "certificate": row[7]}
 
 
-def revoke(serial: str, reason: str,
+def revoke(serial: str, reason: str, by: str | None = None,
            when: datetime.datetime | None = None) -> bool:
     """False if the serial was never issued here or was already revoked."""
     when = when or datetime.datetime.now(datetime.timezone.utc)
     with _conn() as c:
         changed = c.execute(
-            "UPDATE issued SET revoked_at=?, reason=?"
+            "UPDATE issued SET revoked_at=?, reason=?, revoked_by=?"
             " WHERE serial=? AND revoked_at IS NULL",
-            (when.isoformat(), reason, serial),
+            (when.isoformat(), reason, by, serial),
         ).rowcount
         if changed == 1:
             _bump_crl_number(c)

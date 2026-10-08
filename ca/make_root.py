@@ -4,6 +4,7 @@
 """
 import argparse
 import datetime
+import os
 import sys
 from pathlib import Path
 
@@ -41,6 +42,7 @@ def write_key(path: Path, key) -> None:
     path.write_bytes(key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption()))
+    os.chmod(path, 0o600)
 
 
 def main() -> None:
@@ -59,10 +61,12 @@ def main() -> None:
         .subject_name(ROOT_SUBJECT).issuer_name(ROOT_SUBJECT)
         .public_key(root_key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(now).not_valid_after(now + datetime.timedelta(days=args.days))
+        .not_valid_before(now - datetime.timedelta(minutes=5))
+        .not_valid_after(now + datetime.timedelta(days=args.days))
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        # A root signs certificates and CRLs, nothing else.
         .add_extension(x509.KeyUsage(
-            digital_signature=True, content_commitment=False, key_encipherment=False,
+            digital_signature=False, content_commitment=False, key_encipherment=False,
             data_encipherment=False, key_agreement=False, key_cert_sign=True,
             crl_sign=True, encipher_only=False, decipher_only=False), critical=True)
         .add_extension(x509.SubjectKeyIdentifier.from_public_key(root_key.public_key()),
@@ -81,7 +85,7 @@ def main() -> None:
     tls_key = generate_key(args.algo)
     csr = x509.CertificateSigningRequestBuilder().subject_name(TLS_SUBJECT).sign(
         tls_key, hashes.SHA256())
-    san = BASE_SAN + [s.strip() for s in args.san.split(",") if s.strip()]
+    san = ["ca.vpp.local"] + BASE_SAN + [s.strip() for s in args.san.split(",") if s.strip()]
     issued = ra_service.issue_from_csr(csr.public_bytes(serialization.Encoding.PEM).decode(),
                                        profile="tls-server", san=san)
     write_key(CERTS / "server.key", tls_key)

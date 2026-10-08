@@ -82,6 +82,10 @@ def signed_by_ca(cn: str, days_ago: int = 0):
         .not_valid_before(now - datetime.timedelta(days=days_ago + 1))
         .not_valid_after(now + datetime.timedelta(days=1 - days_ago))
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(x509.KeyUsage(
+            digital_signature=True, content_commitment=False, key_encipherment=False,
+            data_encipherment=False, key_agreement=False, key_cert_sign=False,
+            crl_sign=False, encipher_only=False, decipher_only=False), critical=True)
         .sign(ca_key, hashes.SHA256())
     )
     return key, cert.public_bytes(serialization.Encoding.PEM).decode()

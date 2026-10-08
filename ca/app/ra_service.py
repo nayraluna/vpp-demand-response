@@ -114,6 +114,10 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
     # Proof of possession: the CSR must be signed by the key it carries.
     if not csr.is_signature_valid:
         raise InvalidCSR("CSR self-signature does not verify")
+    if not csr.subject.rdns:
+        raise InvalidCSR("CSR has an empty subject")
+    if csr.subject == _ca_cert.subject:
+        raise InvalidCSR("CSR asks for the CA's own name")
 
     public_key = csr.public_key()
     key_id = _public_key_id(public_key)
@@ -124,6 +128,7 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
     # Possession of a key proves nothing about the name in the CSR: without this a fresh key
     # could be certified under an existing identity. Only the serial a renewal replaces may be live.
     now = datetime.datetime.now(datetime.timezone.utc)
+    supersedes = registry.normalize_serial(supersedes) if supersedes else None
     live = registry.live_serial_for_subject(csr.subject.rfc4514_string(), now)
     if live and live != supersedes:
         raise AlreadyEnrolled(f"subject already holds a live certificate (serial {live})")
@@ -138,7 +143,8 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
         .issuer_name(_ca_cert.subject)
         .public_key(public_key)
         .serial_number(serial)
-        .not_valid_before(now)
+        # Five minutes of slack: a relying party whose clock runs behind must not refuse a fresh certificate.
+        .not_valid_before(now - datetime.timedelta(minutes=5))
         .not_valid_after(not_after)
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .add_extension(
@@ -167,11 +173,12 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
     cert = builder.sign(_ca_key, hashes.SHA256())
 
     serial_hex = format(serial, "x")
-    registry.record(serial_hex, key_id, cert.subject.rfc4514_string(), now, not_after)
+    pem = cert.public_bytes(serialization.Encoding.PEM).decode()
+    registry.record(serial_hex, key_id, cert.subject.rfc4514_string(), now, not_after, pem, profile)
     if supersedes:
-        registry.revoke(supersedes, "superseded")
+        registry.revoke(supersedes, "superseded", by=cert.subject.rfc4514_string())
     return {
-        "certificate": cert.public_bytes(serialization.Encoding.PEM).decode(),
+        "certificate": pem,
         "subject": cert.subject.rfc4514_string(),
         "serial": serial_hex,
         "not_after": not_after.isoformat(),
@@ -179,9 +186,18 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
 
 
 def _issued_here(cert: x509.Certificate) -> bool:
+    """Signed by this CA, the root still valid, the leaf an end entity that may sign."""
     try:
         cert.verify_directly_issued_by(_ca_cert)
-        return True
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if not (_ca_cert.not_valid_before_utc <= now <= _ca_cert.not_valid_after_utc):
+            return False
+        if not _ca_cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
+            return False
+        # The leaf must be an end entity allowed to sign, not a CA certificate used as one.
+        if cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
+            return False
+        return cert.extensions.get_extension_for_class(x509.KeyUsage).value.digital_signature
     except Exception:
         return False
 
@@ -219,6 +235,10 @@ def verify_revocation_request(token: str) -> dict:
     serial = payload.get("serial")
     if not isinstance(serial, str) or not serial:
         raise InvalidRequest("request must name the serial to revoke")
+    try:
+        serial = registry.normalize_serial(serial)
+    except ValueError as e:
+        raise InvalidRequest(str(e))
     reason = str(payload.get("reason") or "unspecified")
     if reason not in REASONS:
         raise InvalidRequest(f"unknown revocation reason {reason!r}, use one of {sorted(REASONS)}")

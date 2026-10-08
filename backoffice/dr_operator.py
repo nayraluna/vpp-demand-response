@@ -1,6 +1,8 @@
 import argparse
 import base64
+import datetime
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -49,6 +51,7 @@ def init_credential(force: bool = False) -> tuple[str, str]:
     KEY_FILE.write_bytes(key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption()))
+    os.chmod(KEY_FILE, 0o600)
     return str(CRT_FILE), str(KEY_FILE)
 
 
@@ -62,7 +65,15 @@ def _chains_to_current_root(cert: x509.Certificate) -> bool:
     root = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
     try:
         cert.verify_directly_issued_by(root)
-        return True
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if not (root.not_valid_before_utc <= now <= root.not_valid_after_utc):
+            return False
+        if not root.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
+            return False
+        # The leaf must be an end entity allowed to sign, not a CA certificate used as one.
+        if cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
+            return False
+        return cert.extensions.get_extension_for_class(x509.KeyUsage).value.digital_signature
     except Exception:
         return False
 

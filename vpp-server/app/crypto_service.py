@@ -28,9 +28,18 @@ def initialize() -> None:
 
 
 def issued_by_ca(cert: x509.Certificate) -> bool:
+    """Signed by the root, the root itself still a valid CA, the leaf an end entity that may sign."""
     try:
         cert.verify_directly_issued_by(_ca_certificate)
-        return True
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if not (_ca_certificate.not_valid_before_utc <= now <= _ca_certificate.not_valid_after_utc):
+            return False
+        if not _ca_certificate.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
+            return False
+        # The leaf must be an end entity allowed to sign, not a CA certificate used as one.
+        if cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
+            return False
+        return cert.extensions.get_extension_for_class(x509.KeyUsage).value.digital_signature
     except Exception:
         return False  # fail closed on bad signature, foreign scheme or malformed cert
 
@@ -74,10 +83,5 @@ def _certificate_x5c() -> str:
 
 def sign_jws(payload: dict) -> str:
     """Compact JWS carrying the VPP certificate in x5c so the verifier can chain it to the CA."""
-    key_pem = _private_key.private_bytes(
-        serialization.Encoding.PEM,
-        serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption(),
-    )
     headers = {"typ": "application/dr-event+json", "x5c": [_certificate_x5c()]}
-    return jwt.encode(payload, key_pem, algorithm=jws_algorithm(_private_key), headers=headers)
+    return jwt.encode(payload, _private_key, algorithm=jws_algorithm(_private_key), headers=headers)

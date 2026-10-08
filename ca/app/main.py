@@ -54,7 +54,7 @@ def ra_revoke(req: RevocationRequest) -> dict:
         raise HTTPException(status_code=403, detail=str(e))
 
     serial = order["serial"]
-    if registry.revoke(serial, order["reason"]):
+    if registry.revoke(serial, order["reason"], by=order["requested_by"]):
         return {"revoked": serial, "reason": order["reason"],
                 "requested_by": order["requested_by"],
                 "crl_number": registry.crl_number()}

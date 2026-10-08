@@ -22,9 +22,18 @@ class AlreadyPaired(Exception):
 
 
 def _issued_by(cert: x509.Certificate, issuer: x509.Certificate) -> bool:
+    """Signed by the issuer, the issuer still a valid CA, the leaf an end entity that may sign."""
     try:
         cert.verify_directly_issued_by(issuer)
-        return True
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if not (issuer.not_valid_before_utc <= now <= issuer.not_valid_after_utc):
+            return False
+        if not issuer.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
+            return False
+        # The leaf must be an end entity allowed to sign, not a CA certificate used as one.
+        if cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
+            return False
+        return cert.extensions.get_extension_for_class(x509.KeyUsage).value.digital_signature
     except Exception:
         # Fail closed: any verification error means "not issued by this issuer".
         return False

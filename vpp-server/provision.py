@@ -4,6 +4,7 @@
     python provision.py install <signed.crt>        writes vpp.crt
 """
 import argparse
+import os
 import shutil
 from pathlib import Path
 
@@ -27,6 +28,7 @@ def request(algo: str) -> None:
     (CERTS / "vpp.key").write_bytes(key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption()))
+    os.chmod(CERTS / "vpp.key", 0o600)
     (CERTS / "vpp.csr").write_bytes(csr.public_bytes(serialization.Encoding.PEM))
     print(f"vpp: key generated, CSR for {SUBJECT.rfc4514_string()} at {CERTS / 'vpp.csr'}")
 

@@ -247,6 +247,11 @@ def main():
         r = revoke(okey, opem, "deadbeef")
         ok(f"a serial this CA never issued is refused ({r.status_code})") if r.status_code == 404 \
             else die(f"expected 404, got {r.status_code} {r.text}")
+        padded = userial.upper().rjust(len(userial) + len(userial) % 2, "0")
+        as_openssl = ":".join(padded[i:i + 2] for i in range(0, len(padded), 2))
+        r = revoke(okey, opem, as_openssl)
+        ok(f"the serial as openssl prints it is recognised ({r.status_code} already revoked)") \
+            if r.status_code == 409 else die(f"expected 409 for {as_openssl}, got {r.status_code} {r.text}")
 
         print("G6: a revoked operator cannot revoke anyone else")
         o2key, o2pem, _, o2serial = ra_identity(f"op-{secrets.token_hex(3)}", role="operator")

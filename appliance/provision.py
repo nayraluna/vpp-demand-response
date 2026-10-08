@@ -4,6 +4,7 @@
     python provision.py install <signed.crt> <root.crt>
 """
 import argparse
+import os
 import shutil
 from pathlib import Path
 
@@ -33,6 +34,7 @@ def request(ven: str, power: int, algo: str) -> None:
     (HSM / "VEN.key").write_bytes(key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption()))
+    os.chmod(HSM / "VEN.key", 0o600)
     (HSM / "VEN.csr").write_bytes(csr.public_bytes(serialization.Encoding.PEM))
     print(f"appliance: key generated in the HSM, CSR for {subject.rfc4514_string()} at {HSM / 'VEN.csr'}")
 
