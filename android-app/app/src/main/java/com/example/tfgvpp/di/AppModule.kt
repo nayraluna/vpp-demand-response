@@ -13,14 +13,8 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object AppModule {
 
-    /**
-     * Emulator: 10.0.2.2 is the host's loopback as seen from inside the
-     * emulator. Physical device over USB: 127.0.0.1 works through
-     * `adb reverse` (recreated on install by the `adbReverseVpp` task). Both
-     * addresses are in the VPP certificate's SAN. (For a cable-free demo over
-     * Wi-Fi, use the PC's LAN IP instead -- also in the SAN -- and open the
-     * Windows firewall.)
-     */
+    /** 10.0.2.2 is the host loopback from the emulator; a USB device reaches 127.0.0.1 through
+     *  adb reverse. Both are in the VPP certificate's SAN. */
     @Provides
     @Singleton
     fun provideVppEndpoints(): VppEndpoints {
@@ -28,13 +22,8 @@ object AppModule {
             if (Build.PRODUCT.contains("sdk") || Build.FINGERPRINT.contains("generic"))
                 "10.0.2.2"
             else "127.0.0.1"
-        // URLs as seen FROM THE APPLIANCE, which the app hands over during
-        // pairing. A Raspberry Pi on the home network could never reach a
-        // 127.0.0.1 handed to it in the bundle, so this must be the PC's LAN
-        // address -- configured in local.properties as `vpp.lan.host` and added
-        // to the certificate SAN via EXTRA_SAN_IPS. When unset it falls back to
-        // the host the app uses itself, which is correct for an emulator or a
-        // USB-tethered appliance running on the same PC.
+        // As seen from the appliance: a Pi on the LAN cannot reach a 127.0.0.1 handed over in the
+        // bundle, so vpp.lan.host from local.properties (also in the SAN) when set.
         val applianceHost = BuildConfig.VPP_LAN_HOST.ifBlank { host }
 
         return VppEndpoints(

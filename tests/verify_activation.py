@@ -42,14 +42,11 @@ def die(msg):
 
 
 def reset_operational_state():
-    """Test setup: drop activations/evidence left by an earlier run, so the
-    appliance is not still inside a previous recovery window (which selection
-    would correctly refuse) and the suite stays repeatable."""
+    """Drop earlier runs' activations, or selection refuses an appliance still in recovery."""
     with sqlite3.connect(str(DB_FILE)) as c:
         c.execute("DELETE FROM evidence")
         c.execute("DELETE FROM activations")
-        # A synthetic population left by the backoffice would absorb the
-        # selection instead of the real appliance under test.
+        # A leftover synthetic population would absorb the selection instead of the real appliance.
         c.execute("DELETE FROM availability WHERE ven_subject LIKE 'CN=syn-%'")
         c.execute("DELETE FROM appliances WHERE ven_subject LIKE 'CN=syn-%'")
         c.execute("DELETE FROM users WHERE subject LIKE 'CN=syn-user-%'")
@@ -88,9 +85,7 @@ def sign_as(key, cert_pem: str, payload: dict, typ: str) -> str:
 
 
 def onboard(key, cert_pem, client, calendar) -> str:
-    """Pair, bind ownership, and declare the owner-signed calendar at the VPP.
-    Neither the VEN registration nor the calendar delivery happen here: the
-    appliance obtains both autonomously through its first outbound poll."""
+    """Pair, bind and declare; the appliance registers and fetches the calendar on its own poll."""
     requests.post(f"{APP}/factory-reset")
     bundle = sign_as(key, cert_pem, {
         "vpp_url": VPP, "vpp_mtls_url": MTLS,
@@ -133,8 +128,7 @@ def hole_slots() -> tuple[int, int]:
 
 
 def open_calendar() -> dict:
-    """Full availability except the hole, every day: isolates each appliance
-    check (availability vs time window) from the hour at which the gate runs."""
+    """Open every day except the hole, so the checks do not depend on when the gate runs."""
     hole_start, hole_end = hole_slots()
     bitmap = "1" * hole_start + "0" * (hole_end - hole_start) \
         + "1" * (av.SLOTS_PER_DAY - hole_end)
@@ -225,7 +219,6 @@ def main():
             else die(f"activation delivered twice: {body}")
 
         print("G5: a replayed activation is refused by the appliance")
-        # Re-issue the very same activation straight into the VPP's queue.
         with sqlite3.connect(str(DB_FILE)) as c:
             c.execute("UPDATE activations SET delivered_at=NULL WHERE activation_id=?",
                       (act_id,))
@@ -245,12 +238,10 @@ def main():
             else die(f"hole activation not refused: {body}")
 
         print("G7: an activation is executed WHEN it says, or not at all")
-        # For another day of the week: must never run today.
         tomorrow = av.DAYS[(now_utc().weekday() + 1) % 7]
         inject_activation(ven, "act-tomorrow", tomorrow,
                           window["slot_start"], window["slot_end"])
-        # For today, but a window that does not cover *now* (already elapsed,
-        # or - within the first hour of the day - not started yet).
+        # Already elapsed, or not yet started within the first hour of the day.
         slot = now_slot()
         off_start, off_end = (slot - 2, slot) if slot >= 2 else (slot + 4, slot + 6)
         inject_activation(ven, "act-offwindow", current_window()["day"],

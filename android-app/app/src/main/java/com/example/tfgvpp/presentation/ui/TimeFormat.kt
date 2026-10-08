@@ -19,11 +19,7 @@ internal fun readableLocalTime(iso: String): String = try {
     iso
 }
 
-/**
- * Day and month only, for a chart axis where a full timestamp would not fit
- * ("27/8" in Spain, "8/27" in the US). Empty when the timestamp does not
- * parse, so an unlabelled bar degrades better than a crashed screen.
- */
+/** Day and month only, locale-ordered; empty when the timestamp does not parse. */
 internal fun shortLocalDate(iso: String): String = try {
     val locale = Locale.getDefault()
     OffsetDateTime.parse(iso)

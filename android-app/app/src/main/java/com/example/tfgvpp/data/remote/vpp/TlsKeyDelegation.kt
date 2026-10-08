@@ -75,13 +75,8 @@ object TlsKeyDelegation {
         }
     }
 
-    /**
-     * Wraps hardware-backed Android Keystore keys for TLS use; any other key
-     * (e.g. the JVM flow test's software keys) is returned untouched. The
-     * delegation provider is appended at the END of the provider list -- it
-     * only ever accepts [OpaquePrivateKey], so it cannot interfere with
-     * anything else (lesson learned from the DNIe provider incident).
-     */
+    /** Wraps Android Keystore keys for TLS; other keys pass untouched. The provider goes at the END of
+     *  the list and accepts only [OpaquePrivateKey], so it cannot capture other crypto. */
     fun forTls(key: PrivateKey): PrivateKey {
         if (!key.javaClass.name.startsWith("android.security.keystore")) return key
         if (Security.getProvider(provider.name) == null) Security.addProvider(provider)

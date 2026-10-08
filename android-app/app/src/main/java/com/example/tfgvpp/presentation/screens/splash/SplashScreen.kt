@@ -42,8 +42,7 @@ fun SplashScreen(
         }
     }
 
-    // The only screen without a Scaffold, so it keeps clear of the system bars
-    // on its own now that the window is edge-to-edge.
+    // No Scaffold here, so it keeps clear of the system bars itself.
     Column(
         modifier = Modifier.fillMaxSize().safeDrawingPadding(),
         verticalArrangement = Arrangement.Center,

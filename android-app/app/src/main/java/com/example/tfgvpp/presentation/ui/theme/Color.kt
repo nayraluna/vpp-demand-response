@@ -2,8 +2,7 @@ package com.example.tfgvpp.presentation.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Sage-green palette, Material 3 tonal roles. Every on-color meets WCAG AA
-// (>= 4.5:1) against the surface it is used on.
+// Sage-green Material 3 tonal palette; every on-color meets WCAG AA.
 val SagePrimary = Color(0xFF5C6C4F)
 val SageOnPrimary = Color(0xFFFFFFFF)
 val SageContainer = Color(0xFFDEE7CC)

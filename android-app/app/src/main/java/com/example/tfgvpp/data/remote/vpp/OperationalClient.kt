@@ -25,11 +25,10 @@ class OperationalClient(caInput: InputStream, registration: RegistrationClient.R
         val maxCurtail: Long,
         val recovery: Long,
         val availability: Map<String, String>?, // day -> 48-slot bitmap, null if undeclared
-        val version: Long?,                     // calendar version the VPP recorded
+        val version: Long?,
         val updatedAt: String?,
     )
 
-    /** The user's appliances as the VPP knows them, with the declared calendar. */
     fun myAppliances(mtlsUrl: String): List<ApplianceInfo> {
         val json = getJson("$mtlsUrl/availability")
         @Suppress("UNCHECKED_CAST")
@@ -52,23 +51,13 @@ class OperationalClient(caInput: InputStream, registration: RegistrationClient.R
     data class DeclareResult(
         val ven: String,
         val declaredSlots: Long,
-        val vppStatus: String,  // "declared"
-        val version: Long,      // monotonic version the VPP recorded
+        val vppStatus: String,
+        val version: Long,
     )
 
-    /**
-     * Declares the weekly calendar for one appliance at the VPP (mutual TLS,
-     * only the recorded owner is accepted), as a JWS signed by the owner with
-     * a monotonically increasing version. The appliance retrieves the signed
-     * artefact through its outbound polling and adopts it only if the version
-     * is newer than the one it holds, so an old calendar cannot be replayed.
-     *
-     * The next version is DERIVED FROM THE VPP'S STORED STATE, not from a
-     * counter on the phone: one above the last recorded version, or the wall
-     * clock if greater. A reinstalled application therefore still produces
-     * versions the appliance accepts, and a clock running behind cannot
-     * produce a stale one.
-     */
+    /** Owner-signed, versioned calendar: the appliance adopts only a newer version, so an old one cannot
+     *  be replayed. The version derives from the VPP's stored state, not a phone counter, so a reinstall
+     *  or a slow clock cannot produce a stale one. */
     fun declareAvailability(
         mtlsUrl: String, ven: String, slots: Map<String, String>,
     ): DeclareResult {
@@ -90,7 +79,7 @@ class OperationalClient(caInput: InputStream, registration: RegistrationClient.R
         val activationId: String,
         val ven: String,
         val day: String,
-        val interval: String,     // e.g. "15:00-17:00"
+        val interval: String,     // "15:00-17:00"
         val action: String,       // "reduce" | "shutdown"
         val reductionPct: Long,
         val energyKwh: Double,
@@ -106,7 +95,6 @@ class OperationalClient(caInput: InputStream, registration: RegistrationClient.R
         val priceEurPerKwh: Double,
     )
 
-    /** Verified participations of the user's appliances and what they earned. */
     fun participation(mtlsUrl: String): ParticipationSummary {
         val json = getJson("$mtlsUrl/participation")
         @Suppress("UNCHECKED_CAST")
@@ -155,11 +143,7 @@ class OperationalClient(caInput: InputStream, registration: RegistrationClient.R
         val DAYS = listOf("mon", "tue", "wed", "thu", "fri", "sat", "sun")
         const val SLOTS_PER_DAY = 48 // 30-minute slots
 
-        /**
-         * Builds the weekly bitmap: '1' between [fromHour, toHour) on the given
-         * days, '0' elsewhere. Hour granularity is enough for the prototype UI;
-         * the wire format keeps the full 30-minute resolution.
-         */
+        /** '1' between [fromHour, toHour) on the given days, '0' elsewhere. */
         fun weeklySlots(days: Set<String>, fromHour: Int, toHour: Int): Map<String, String> {
             require(fromHour in 0..23 && toHour in 1..24 && fromHour < toHour) {
                 "invalid hour range $fromHour..$toHour"

@@ -75,25 +75,12 @@ class RegistrationClient(caInput: InputStream) {
                     (enrollStatus == "enrolled" || enrollStatus == "already-enrolled")
     }
 
-    /**
-     * Runs the two exchanges of user registration against the live services.
-     *
-     * @param commonName subject CN the RA will certify (e.g. "android-3f9c21").
-     * @param raUrl      CA base URL, registration authority side (port 8081).
-     * @param vppUrl     VPP server-authenticated base URL (port 8080).
-     * @param keyPair    the user's key pair. On the phone it is generated
-     *                   inside the Android Keystore (CredentialStore), so the
-     *                   private key is non-exportable; the default software
-     *                   key keeps this class runnable on the plain JVM.
-     */
+    /** CSR to the RA, then enroll at the VPP; the default software key keeps this runnable on the JVM. */
     fun register(
         commonName: String, raUrl: String, vppUrl: String,
         keyPair: KeyPair = softwareKeyPair(),
     ): Registration {
-        // PKCS#10 CSR: public key + subject + self-signature (proof of
-        // possession). The signer resolves the JCA provider from the key, so
-        // it works for both software and Android Keystore private keys; the
-        // algorithm follows the key type (EC on the phone, RSA on the JVM).
+        // The signer resolves the JCA provider from the key, so a Keystore key works unchanged.
         val csrAlgorithm =
             if (keyPair.private.algorithm == "EC") "SHA256withECDSA" else "SHA256withRSA"
         val csr = JcaPKCS10CertificationRequestBuilder(
@@ -107,8 +94,7 @@ class RegistrationClient(caInput: InputStream) {
             .generateCertificate(certPem.byteInputStream()) as X509Certificate
         val credential = UserCredential(keyPair.private, userCert, certPem)
 
-        // Enroll at the VPP with the issued certificate; keep the returned
-        // Cert_VPP -- the pairing bundle delivers it to the appliance later.
+        // Cert_VPP is kept: the pairing bundle delivers it to the appliance.
         val enroll = postJson("$vppUrl/enroll", mapOf("certificate" to certPem))
         val vppCertPem = enroll["vpp_certificate"] as String
         val vppCert = CertificateFactory.getInstance("X.509")
@@ -164,19 +150,9 @@ class RegistrationClient(caInput: InputStream) {
             return out.toString()
         }
 
-        /** OkHttp client that AUTHENTICATES with the credential (mutual TLS).
-         *
-         * The credential is presented through a key manager rather than an
-         * in-memory PKCS#12 store: an Android Keystore private key is
-         * non-exportable -- it can be USED to sign the handshake, but never
-         * serialised into a store -- so the key must be used in place.
-         *
-         * The channel stays pinned to TLS 1.2. The pin predates the EC
-         * credential (TLS 1.3 mandates RSA-PSS for the client's
-         * CertificateVerify, which some Keymasters fail with RSA Keystore
-         * keys); with ECDSA 1.3 would likely negotiate fine, but every
-         * end-to-end validation on real hardware ran over 1.2, so unpinning
-         * is deliberately left untested. */
+        /** Mutual-TLS client. A key manager, not a PKCS#12 store: a Keystore key is non-exportable and must
+         *  sign in place. Pinned to TLS 1.2: 1.3's RSA-PSS CertificateVerify failed on some Keymasters and
+         *  every validation on real hardware ran over 1.2. */
         fun buildMutualTlsClient(
             credential: UserCredential, caCertificate: X509Certificate,
         ): OkHttpClient {
@@ -197,10 +173,7 @@ class RegistrationClient(caInput: InputStream) {
         fun softwareKeyPair(): KeyPair =
             KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
 
-        /** Compact JWS signed with the credential, its certificate in the x5c
-         *  header. ES256 for EC credentials (the phone's Keystore key), RS256
-         *  for RSA ones (the JVM tests' software keys); the platform verifies
-         *  both. */
+        /** Compact JWS with the certificate in x5c; ES256 for EC keys, RS256 for RSA, the platform accepts both. */
         fun signedJws(credential: UserCredential, claims: Map<String, Any>): String {
             val isEc = credential.privateKey.algorithm == "EC"
             val algorithm = if (isEc) JWSAlgorithm.ES256 else JWSAlgorithm.RS256
@@ -235,9 +208,8 @@ class RegistrationClient(caInput: InputStream) {
 
         override fun getCertificateChain(alias: String?) = arrayOf(credential.certificate)
 
-        // Keystore-backed keys travel wrapped so Conscrypt signs them through
-        // the JCA path instead of the native keystore engine, broken on some
-        // vendor ROMs (see TlsKeyDelegation); software keys pass untouched.
+        // Keystore keys go wrapped so Conscrypt signs through JCA, not the native keystore
+        // engine broken on some vendor ROMs (see TlsKeyDelegation).
         override fun getPrivateKey(alias: String?): PrivateKey =
             TlsKeyDelegation.forTls(credential.privateKey)
 

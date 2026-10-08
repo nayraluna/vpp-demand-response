@@ -50,7 +50,7 @@ def run_cli(*args):
     return r.stdout
 
 
-SAMPLES = 15   # repetitions of every operation that can be repeated
+SAMPLES = 15
 WARMUP = 2     # discarded: the first TLS handshake is not representative
 summary["method"]["warmup_discarded"] = WARMUP
 summary["method"]["samples_per_repeatable_op"] = SAMPLES
@@ -69,8 +69,7 @@ def _pct(values, q):
 
 
 def record(label, values):
-    """Distribution of a repeated operation. n is reported so the percentiles
-    can be read for what they are worth."""
+    """Distribution of a repeated operation, with n so the percentiles can be judged."""
     summary["timings_ms"][label] = {
         "p50": round(statistics.median(values), 1),
         "p95": round(_pct(values, 0.95), 1),
@@ -86,8 +85,7 @@ def sample(label, fn, n=SAMPLES, warmup=WARMUP):
 
 
 def once(label, ms, why):
-    """A step that cannot be repeated without changing what it measures.
-    Recorded as the single sample it is rather than dressed up as a median."""
+    """A step that cannot be repeated without changing what it measures."""
     summary["timings_ms"][label] = {
         "ms": round(ms, 1), "n": 1, "single_sample": why}
 
@@ -149,8 +147,7 @@ def slot_hhmm(s):
 def main():
     print("== phase 0: reset + identities ==")
     reset_operational_state()
-    # Names carry a run tag: the CA issues one live certificate per subject,
-    # so a second run must not ask for the names the first one still holds.
+    # The CA issues one live certificate per subject, so names carry a run tag.
     run = secrets.token_hex(2)
     key, cert_pem, client = ra_identity(f"eval-user-{run}")
 
@@ -216,7 +213,6 @@ def main():
 
     sample("availability_declare", declare)
 
-    # warm-up poll: VEN self-registration + calendar adoption (not timed as RTT)
     (r, ms) = timed(lambda: requests.post(f"{APP}/poll"))
     r.raise_for_status()
     once("first_poll_register_adopt", ms,
@@ -290,11 +286,9 @@ def main():
         "event_slot": start, "event_slot_label": slot_hhmm(start)}
 
     print("== phase 4: multi-household aggregation event (6 kW) ==")
-    # (a) infeasible attempt in the population's dead zone (current slot, if empty)
     inf = run_cli("backoffice/dr_operator.py", "select", "--power", "6000",
                   "--day", day, "--from", slot_hhmm(start), "--to", slot_hhmm(end))
     summary["aggregation_infeasible_output"] = inf.strip()
-    # (b) the real event at the population's peak for today
     pk_start = min(peak_slot, av.SLOTS_PER_DAY - 2)
     pk_end = pk_start + 2
     summary["aggregation_event_interval"] = f"{slot_hhmm(pk_start)}-{slot_hhmm(pk_end)}"

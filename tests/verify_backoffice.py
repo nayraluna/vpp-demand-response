@@ -75,8 +75,6 @@ def main():
             if "CN=syn-" in text and "P (W)" in text else die("view 1 incomplete")
 
         print("G3: view 2 aggregates available power per slot")
-        # Independent hand-check of one slot (mon 18:00 = slot 36) straight
-        # from the DB, against what the view reports.
         with sqlite3.connect(db.DB_FILE) as c:
             rows = c.execute(
                 """SELECT a.nominal_power, v.slots FROM appliances a
@@ -115,8 +113,7 @@ def main():
             if "role=operator" in ous else die(f"unexpected OUs {ous}")
 
         print("G6: a large reduction is served by many synthetic households")
-        # mon 18:00-18:30: inside the worker and evening profiles, and short
-        # enough (30 min) for every appliance type including the fridge.
+        # Inside the worker and evening profiles, and short enough for every type, fridge included.
         request = {"power_w": 6000, "day": "mon", "slot_start": 36, "slot_end": 37}
         r = requests.post(f"{MTLS}/dr/select", json=request,
                           cert=(crt, key), verify=CA_FILE)

@@ -36,14 +36,14 @@ class PairingClient(caInput: InputStream, private val registration: Registration
     }
 
     data class PairResult(
-        val status: String,               // "paired"
-        val venSubject: String,           // from the owner proof's x5c certificate
-        val owner: String,                // who the appliance recorded as its owner
-        val parameters: Map<String, Long>,// P (W), max (min), rec (min), from the proof
-        val ownerProof: String,           // compact JWS, signed inside the HSM
+        val status: String,
+        val venSubject: String,
+        val owner: String,
+        val parameters: Map<String, Long>, // P (W), max (min), rec (min), from the signed proof
+        val ownerProof: String,
         val proofSignatureValid: Boolean,
         val proofCertChainsToRa: Boolean,
-        val proofOwnerMatches: Boolean,   // proof.owner == our certificate subject
+        val proofOwnerMatches: Boolean,
         val powerMatchesCertified: Boolean, // proof.P == OU=P=<W> in the VEN cert
     ) {
         val allPassed: Boolean
@@ -53,21 +53,13 @@ class PairingClient(caInput: InputStream, private val registration: Registration
 
     data class BindResult(val status: String, val ven: String, val owner: String)
 
-    /**
-     * @param applianceUrl          the appliance's local pairing service (port 8082).
-     * @param vppUrlForAppliance    VPP bootstrap URL as seen FROM THE APPLIANCE
-     *                              (it runs on the PC, so its loopback -- not the
-     *                              phone's view of the same service).
-     * @param vppMtlsUrlForAppliance idem for the mutually authenticated endpoint.
-     */
+    /** The VPP URLs are as reached from the appliance, not from the phone. */
     fun pair(
         applianceUrl: String,
         vppUrlForAppliance: String,
         vppMtlsUrlForAppliance: String,
     ): PairResult {
-        // The bundle: what the appliance needs in order to operate. Signing it
-        // with the user's key is what tells the appliance, in an authenticated
-        // way, WHO is enrolling it (the identity the owner proof will bind).
+        // Signing the bundle is what tells the appliance, authenticated, who is enrolling it.
         val payload = mapOf(
             "vpp_url" to vppUrlForAppliance,
             "vpp_mtls_url" to vppMtlsUrlForAppliance,
@@ -108,15 +100,13 @@ class PairingClient(caInput: InputStream, private val registration: Registration
         val claims = jws.payload.toJSONObject()
         val ownerMatches = claims["owner"] == registration.credential.subject
 
-        // The parameters are read from the SIGNED payload, never from the plain
-        // fields of the pairing response: the local channel has no integrity
-        // protection, only the artefacts it carries do.
+        // Parameters come from the signed payload, never the plain response fields: the local
+        // channel has no integrity protection, only the artefacts it carries do.
         val parameters = listOf("P", "max", "rec")
             .associateWith { (claims[it] as Number).toLong() }
 
-        // The CA certifies the nominal power inside the VEN certificate
-        // (OU=P=<watts>); the proof must declare the same value. The OU is read
-        // from the ASN.1 name directly: string forms escape the inner '='.
+        // The CA certifies the nominal power as OU=P=<W>; read from the ASN.1 name because
+        // string forms escape the inner '='.
         val venSubject = venCert.subjectX500Principal.getName(X500Principal.RFC2253)
         val certifiedPower = X500Name.getInstance(venCert.subjectX500Principal.encoded)
             .getRDNs(BCStyle.OU)
@@ -135,7 +125,6 @@ class PairingClient(caInput: InputStream, private val registration: Registration
         )
     }
 
-    /** Step 8c: deliver the owner proof to the VPP over the mTLS channel. */
     fun forwardOwnerProof(vppMtlsUrl: String, ownerProof: String): BindResult {
         val body = JSONObjectUtils.toJSONString(mapOf("owner_proof" to ownerProof))
             .toRequestBody(jsonType)
@@ -152,7 +141,7 @@ class PairingClient(caInput: InputStream, private val registration: Registration
         }
     }
 
-    /** Sanity check of the mutual-TLS channel: who does the VPP think we are? */
+    /** Who the VPP sees on the mutual-TLS channel. */
     fun session(vppMtlsUrl: String): String {
         val req = Request.Builder().url("$vppMtlsUrl/session").build()
         mtls.newCall(req).execute().use { r ->
@@ -163,7 +152,6 @@ class PairingClient(caInput: InputStream, private val registration: Registration
     }
 
     companion object {
-        /** Returns the appliance to state 0 so pairing can be exercised again. */
         fun factoryReset(applianceUrl: String): String {
             val req = Request.Builder().url("$applianceUrl/factory-reset")
                 .post(ByteArray(0).toRequestBody(null)).build()

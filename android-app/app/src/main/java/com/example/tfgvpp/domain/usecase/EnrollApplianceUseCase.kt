@@ -37,8 +37,7 @@ class EnrollApplianceUseCase @Inject constructor(
         emit(EnrollmentProgress.Step(EnrollmentStep.REFRESHING))
         val list = appliances.refresh().getOrDefault(emptyList())
 
-        // Java's RFC 2253 rendering escapes the '=' inside OU=P=<W>; the VPP's
-        // RFC 4514 rendering does not. Strip escapes to match the two forms.
+        // Java's RFC 2253 rendering escapes the '=' inside OU=P=<W>; the VPP's RFC 4514 one does not.
         val enrolled = list.find { it.ven == paired.venSubject.replace("\\", "") }
             ?: Appliance(
                 ven = paired.venSubject,

@@ -33,16 +33,16 @@ def main() -> None:
     san = ",".join([BASE_SAN, *extra])
     CERTS.mkdir(exist_ok=True)
 
-    print("== 1. the CA creates its root and its own TLS certificate ==")
+    print("CA creates root + TLS certificate")
     run("ca/make_root.py", "--algo", args.algo, "--san", ",".join(extra))
 
-    print("\n== 2. the VPP generates its key and asks for a certificate ==")
+    print("VPP generates its key and asks for a certificate with CSR")
     run("vpp-server/provision.py", "request", "--algo", args.algo)
     run("ca/sign_csr.py", "--csr", "certs/vpp.csr", "--out", "certs/vpp.crt",
         "--profile", "tls-server+signing", "--san", san)
     run("vpp-server/provision.py", "install", "certs/vpp.crt")
 
-    print("\n== 3. the appliance generates its key in the HSM and is certified at the factory ==")
+    print("Appliance generates its key (in the HSM) and is certified at the factory")
     run("appliance/provision.py", "request", "--algo", args.algo)
     run("ca/sign_csr.py", "--csr", "certs/VEN.csr", "--out", "certs/VEN.crt",
         "--profile", "client")

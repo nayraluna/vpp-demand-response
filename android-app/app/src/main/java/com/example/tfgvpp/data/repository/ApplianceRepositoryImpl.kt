@@ -95,7 +95,6 @@ class ApplianceRepositoryImpl @Inject constructor(
         }
 }
 
-/** Wire appliance -> domain model. */
 internal fun OperationalClient.ApplianceInfo.toAppliance() = Appliance(
     ven = ven,
     name = Appliance.nameFromVen(ven),

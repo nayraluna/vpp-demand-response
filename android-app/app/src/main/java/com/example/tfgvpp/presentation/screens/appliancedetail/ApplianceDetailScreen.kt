@@ -104,8 +104,6 @@ fun ApplianceDetailScreen(
                     }
                 }
 
-                // One card for the certified parameters: they are read-only and
-                // belong together, so dividers group them better than 5 cards.
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(vertical = 4.dp)) {
                         ParameterRow(

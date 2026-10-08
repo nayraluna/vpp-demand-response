@@ -53,8 +53,6 @@ def write_pair(name: str, key, cert_pem: str):
 
 
 def ra_identity(cn: str, role: str | None = None):
-    """A CA-issued identity. With a role, the subject carries OU=role=<role>,
-    which is how the operator is recognised today."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     attrs = [x509.NameAttribute(NameOID.COMMON_NAME, cn)]
     if role:
@@ -114,8 +112,7 @@ def listed(payload: dict, serial: str) -> bool:
 
 
 def onboard(key, cert_pem: str, client) -> str:
-    """Pair the appliance to this identity and declare a fully open calendar.
-    Registration and calendar delivery happen on the appliance's own poll."""
+    """Pair, bind and declare an open calendar; the appliance registers on its own poll."""
     requests.post(f"{APP}/factory-reset")
     bundle = sign_as(key, cert_pem, {
         "vpp_url": VPP, "vpp_mtls_url": MTLS,
@@ -135,9 +132,7 @@ def onboard(key, cert_pem: str, client) -> str:
 
 
 def plant_crl(token: str) -> None:
-    """Simulate a misbehaving VPP: replace the relay copy the poll serves. The
-    number column is set high so the VPP's own refresh does not overwrite the
-    plant, which is what an attacker holding the database would do."""
+    """A misbehaving VPP: the relayed copy, numbered high so the VPP's own refresh keeps it."""
     with sqlite3.connect(str(DB_FILE)) as c:
         c.execute("INSERT INTO crl(id, jws, crl_number, fetched_at) VALUES(1, ?, 999999, 'planted')"
                   " ON CONFLICT(id) DO UPDATE SET jws=excluded.jws,"
@@ -326,8 +321,7 @@ def main():
             c.execute("DELETE FROM activations WHERE activation_id IN (?, ?)", (act_a, act_b))
 
         print("G13: with the CA unreachable, the VPP serves its copy only until next_update")
-        # The VPP's own verifier, loaded in this process and pointed at a port
-        # nobody listens on, holding the list it would have cached.
+        # The VPP's verifier in-process, pointed at a dead port, holding the list it would have cached.
         sys.path.insert(0, str(ROOT / "vpp-server"))
         from app import revocation  # noqa: E402
         revocation.CA_URL, revocation.MAX_AGE = "https://127.0.0.1:1", 0

@@ -48,7 +48,6 @@ def spki(public_key) -> bytes:
 def main():
     ca = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
 
-    # --- the entity generates its OWN key and a CSR (key never leaves here) ---
     cn = f"ven-{secrets.token_hex(3)}"
     subject = x509.Name([
         x509.NameAttribute(NameOID.COMMON_NAME, cn),
@@ -107,8 +106,7 @@ def main():
     r = requests.post(f"{CA}/ra/issue", json={"csr": "-----not a csr-----"}, verify=CA_FILE)
     ok("malformed CSR rejected (400)") if r.status_code == 400 \
         else die(f"expected 400 on bad CSR, got {r.status_code}")
-    # A new key asking for a name that already has a live certificate. The
-    # CSR is well formed and proves possession, and that is not enough.
+    # A well-formed CSR proving possession of a new key is not enough for a name already live.
     intruder = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     same_name = (x509.CertificateSigningRequestBuilder().subject_name(subject)
                  .sign(intruder, hashes.SHA256()))

@@ -35,15 +35,13 @@ import java.time.ZonedDateTime
 
 class RegistrationFlowTest {
 
-    // Gradle runs unit tests with the module directory as the working
-    // directory, so the repository root is two levels up. -Dtfg.repo overrides it.
+    // Gradle runs unit tests from the module directory; -Dtfg.repo overrides.
     private val repoDir = File(System.getProperty("tfg.repo") ?: "../..")
     private val certsDir = File(repoDir, "certs")
     private val caFile = File(certsDir, "CA.crt")
     private val python = File(repoDir, ".venv/Scripts/python.exe")
 
-    // 127.0.0.1 on purpose, not "localhost": on Windows the name resolves to
-    // ::1 first and every request pays a ~2 s IPv6 connection-failure fallback.
+    // 127.0.0.1, not localhost: on Windows the name resolves to ::1 first and pays a ~2 s fallback.
     private val vppUrl = "https://127.0.0.1:8080"
     private val raUrl = "https://127.0.0.1:8081"
     private val applianceUrl = "http://127.0.0.1:8082"
@@ -63,10 +61,9 @@ class RegistrationFlowTest {
 
     @Test
     fun fullRegistrationAndOperationalFlow() {
-        // A paired appliance refuses to pair again, so start from state 0.
+        // A paired appliance refuses to pair again.
         PairingClient.factoryReset(applianceUrl)
 
-        // ── Step 8a: key pair + CSR -> RA -> enroll at the VPP ───────────────
         val cn = "test-android-" + ByteArray(4).let {
             SecureRandom().nextBytes(it); it.joinToString("") { b -> "%02x".format(b) }
         }
@@ -78,7 +75,6 @@ class RegistrationFlowTest {
         assertEquals("enrolled", reg.enrollStatus)
         assertTrue("Cert_VPP must chain to the RA", reg.vppCertChainsToRa)
 
-        // ── Step 8b: user-signed bundle -> /pair -> parameters + owner proof ─
         val pairing = PairingClient(caFile.inputStream(), reg)
         val p = pairing.pair(applianceUrl, vppUrl, mtlsUrl)
 
@@ -92,7 +88,6 @@ class RegistrationFlowTest {
         val nominalPower = p.parameters["P"] ?: 0
         assertTrue("P must be a positive number of watts", nominalPower > 0)
 
-        // ── Negative: a tampered owner proof must be rejected by the VPP ─────
         val parts = p.ownerProof.split(".")
         val tampered = parts[0] + "." + parts[1].dropLast(2) + "AA." + parts[2]
         try {
@@ -103,22 +98,18 @@ class RegistrationFlowTest {
                 e.message!!.contains("400"))
         }
 
-        // ── Step 8c: the genuine proof binds the appliance over mutual TLS ───
         val bound = pairing.forwardOwnerProof(mtlsUrl, p.ownerProof)
         assertEquals("bound", bound.status)
-        // Java's RFC 2253 form escapes the '=' inside OU=P=2000; Python's RFC 4514
-        // form does not. Strip the escapes to compare the two renderings.
+        // Java's RFC 2253 form escapes the '=' inside OU=P=2000; Python's RFC 4514 form does not.
         assertEquals(p.venSubject.replace("\\", ""), bound.ven)
         assertEquals("CN=$cn", bound.owner)
 
-        // The mTLS channel identifies us as the enrolled user.
         val session = pairing.session(mtlsUrl)
         assertTrue("mTLS session must authenticate us: $session",
             session.contains("\"authenticated\": true") ||
             session.contains("\"authenticated\":true"))
         assertTrue("session user must be us: $session", session.contains("CN=$cn"))
 
-        // ── Negative: pairing again without a factory reset must 409 ─────────
         try {
             pairing.pair(applianceUrl, vppUrl, mtlsUrl)
             fail("the appliance accepted a second pairing while configured")
@@ -127,20 +118,17 @@ class RegistrationFlowTest {
                 e.message!!.contains("409"))
         }
 
-        // ── Operational step 1: declare availability (owner-signed + versioned)
-        // Full-day availability: the appliance refuses any activation whose
-        // slot window does not cover *now*, so the DR event below is issued for
-        // the current UTC window and the calendar must contain it at any hour.
+        // Full week: the appliance executes an activation only inside a declared slot, and the
+        // DR event below targets the current UTC window.
         val op = OperationalClient(caFile.inputStream(), reg)
         val allWeek = OperationalClient.DAYS.toSet()
-        val slots = OperationalClient.weeklySlots(allWeek, 0, 24) // 48 slots/day
+        val slots = OperationalClient.weeklySlots(allWeek, 0, 24)
 
         val declared = op.declareAvailability(mtlsUrl, bound.ven, slots)
         assertEquals("declared", declared.vppStatus)
         assertEquals(7L * 48, declared.declaredSlots)
         assertTrue("the VPP must echo the calendar version", declared.version > 0)
 
-        // The appliance retrieves the signed calendar through its own poll.
         val plain = OkHttpClient()
         postJson(plain, "$applianceUrl/poll", emptyMap())
         assertTrue("the appliance must adopt the owner-signed calendar",
@@ -154,7 +142,6 @@ class RegistrationFlowTest {
         assertEquals(nominalPower, mine[0].nominalPower)
         assertEquals("1".repeat(48), mine[0].availability!!.getValue("mon"))
 
-        // ── Negative: declaring for an appliance we do not own fails ─────────
         try {
             op.declareAvailability(mtlsUrl, "CN=intruso", slots)
             fail("the VPP accepted availability for an unknown appliance")
@@ -163,14 +150,9 @@ class RegistrationFlowTest {
                 e.message!!.contains("404"))
         }
 
-        // ── Operational steps 2-4: a full DR event, driven by a test operator ─
-        // Same reset the repo's own gates perform, so the run is repeatable:
-        // stale activations would otherwise keep the appliance "recovering".
         wipeOperationalTables()
 
-        // The DR operator (recognised by OU=role=operator in its RA certificate)
-        // requests a reduction for the CURRENT UTC window (2 h), since the
-        // appliance executes an activation only inside its declared window.
+        // The operator requests the current UTC window (2 h).
         val ca = CertificateFactory.getInstance("X.509")
             .generateCertificate(caFile.inputStream()) as X509Certificate
         val nowUtc = ZonedDateTime.now(ZoneOffset.UTC)
@@ -187,10 +169,6 @@ class RegistrationFlowTest {
         assertEquals("activated", activate["status"])
         assertEquals(1, (activate["activations"] as List<*>).size)
 
-        // The appliance registers itself with the VTN and pulls the activation.
-        // Its own periodic loop may win the race against this manual poll, so
-        // the assertions are on OUTCOMES (status, participation), not on which
-        // poll consumed the activation.
         postJson(plain, "$applianceUrl/poll", emptyMap())
         assertTrue("the appliance must execute the activation",
             waitUntil {
@@ -200,10 +178,8 @@ class RegistrationFlowTest {
         assertTrue("the appliance must have registered itself as a VEN",
             getJson(plain, "$applianceUrl/status")["registration"] != null)
 
-        // Evidence is signed in the appliance's HSM and submitted outbound.
         postJson(plain, "$applianceUrl/evidence", emptyMap())
 
-        // ── Operational step 5: the app shows the verified reward ────────────
         assertTrue("the verified participation must reach the user",
             waitUntil { op.participation(mtlsUrl).count == 1L })
         val summary = op.participation(mtlsUrl)
@@ -218,11 +194,7 @@ class RegistrationFlowTest {
         assertEquals(summary.totalRewardEur, part.rewardEur, 0.001)
     }
 
-    /**
-     * The appliance serves the QR that in production is printed on it
-     * (requirement U2). It must be a decodable QR whose content is the URL of
-     * the pairing service itself -- and that URL must actually answer.
-     */
+    /** The QR the appliance serves must decode to its own pairing URL, and that URL must answer. */
     @Test
     fun qrEncodesTheAppliancePairingUrl() {
         val plain = OkHttpClient()
@@ -243,11 +215,7 @@ class RegistrationFlowTest {
             ping.contains("appliance"))
     }
 
-    // ── test-only helpers ────────────────────────────────────────────────────
-
-    /** Grayscale PNG -> zxing luminance source, without java.awt (android.jar).
-     *  pngj keeps rows in packed form for bit depths < 8 (segno emits 1-bit
-     *  grayscale: 8 pixels per byte, most significant bit first). */
+    /** Grayscale PNG to zxing luminance source without java.awt (android.jar). */
     private fun decodePng(png: ByteArray): RGBLuminanceSource {
         val reader = PngReaderInt(png.inputStream())
         val info = reader.imgInfo
@@ -260,8 +228,7 @@ class RegistrationFlowTest {
         val pixels = IntArray(w * h)
         for (y in 0 until h) {
             val scan = reader.readRowInt().scanline
-            // pngj may hand the row packed (8/bd samples per byte) or already
-            // expanded to one sample per element; handle both.
+            // pngj hands the row packed (8/bd samples per byte) or already expanded.
             val isPacked = scan.size < w
             for (x in 0 until w) {
                 val sample = if (isPacked) {
@@ -290,9 +257,7 @@ class RegistrationFlowTest {
         }
     }
 
-    /** Polls `probe` until it holds or ~10 s elapse. The appliance's periodic
-     *  VTN polling may consume an activation before this test's manual poll
-     *  does; asserting on the resulting state tolerates either consumer. */
+    /** Polls until it holds or ~10 s pass: the appliance's own VTN polling may win the race against the manual poll. */
     private fun waitUntil(timeoutMs: Long = 10_000, probe: () -> Boolean): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
@@ -304,8 +269,7 @@ class RegistrationFlowTest {
 
     private fun slotLabel(slot: Int) = "%02d:%02d".format(slot / 2, (slot % 2) * 30)
 
-    /** RA-issued credential with OU=role=operator, the DR operator's identity.
-     *  The name is fresh each run: the CA issues one live certificate per subject. */
+    /** RA-issued OU=role=operator credential; fresh name because the CA issues one live certificate per subject. */
     private fun operatorCredential(ca: X509Certificate): RegistrationClient.UserCredential {
         val keyPair = KeyPairGenerator.getInstance("RSA")
             .apply { initialize(2048) }.generateKeyPair()

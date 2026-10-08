@@ -21,7 +21,6 @@ class SessionManager @Inject constructor(
     private val keystore: KeystoreCredentials,
     private val ca: CaProvider,
 ) {
-    /** The live session: real credential plus the DNIe attributes, if any. */
     data class ActiveSession(
         val registration: RegistrationClient.Registration,
         val holderName: String?,
@@ -31,14 +30,12 @@ class SessionManager @Inject constructor(
     private val _session = MutableStateFlow<ActiveSession?>(null)
     val session: StateFlow<ActiveSession?> = _session.asStateFlow()
 
-    /** The current session, or null; repositories that REQUIRE one use [require]. */
     fun current(): ActiveSession? = _session.value
 
-    /** The current registration, failing with a readable message without one. */
+    /** The current registration; fails with a readable message without one. */
     fun require(): RegistrationClient.Registration =
         current()?.registration ?: error("No session: register first")
 
-    /** Rebuilds the persisted session, or null if nothing (usable) was stored. */
     suspend fun restore(): ActiveSession? {
         _session.value?.let { return it }
         val persisted = store.load() ?: return null
@@ -65,7 +62,6 @@ class SessionManager @Inject constructor(
             .also { _session.value = it }
     }
 
-    /** Persists and activates a fresh registration. */
     suspend fun activate(
         registration: RegistrationClient.Registration, identity: EidIdentity?,
     ): ActiveSession {
@@ -81,7 +77,6 @@ class SessionManager @Inject constructor(
             .also { _session.value = it }
     }
 
-    /** Forgets everything: DataStore, Keystore entry, in-memory state. */
     suspend fun clear() {
         store.clear()
         keystore.clear()
@@ -92,7 +87,6 @@ class SessionManager @Inject constructor(
         try { cert.verify(ca.certificate.publicKey); cert.checkValidity(); true } catch (e: Exception) { false }
 }
 
-/** [User] as the presentation layer sees the active session. */
 fun SessionManager.ActiveSession.toUser(): User = User(
     subject = registration.subject,
     commonName = registration.subject.removePrefix("CN="),

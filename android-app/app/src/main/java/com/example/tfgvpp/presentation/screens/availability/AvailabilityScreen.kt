@@ -156,7 +156,7 @@ private val dayLabelIds = listOf(
     R.string.day_fri, R.string.day_sat, R.string.day_sun,
 )
 
-// Shared by the grid layout and the drag hit-testing, so they cannot drift.
+// Shared by the grid layout and the drag hit-testing so they cannot drift.
 private val HourGutterWidth = 36.dp
 private val CellHeight = 26.dp
 private val CellVerticalPadding = 1.dp
@@ -168,7 +168,6 @@ private fun WeekGrid(
     onPaint: (day: String, hour: Int, available: Boolean) -> Unit,
     onToggleDay: (day: String) -> Unit,
 ) {
-    // Colour is the only on/off cue in the grid, hence the legend.
     Row(
         Modifier.fillMaxWidth().padding(bottom = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -178,8 +177,6 @@ private fun WeekGrid(
         LegendItem(MaterialTheme.colorScheme.surfaceVariant, R.string.availability_legend_off)
     }
 
-    // Header: hour gutter + one letter per day (weekend tinted apart).
-    // Tapping a letter fills the whole day, or clears it when already full.
     Row(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
         Box(Modifier.width(HourGutterWidth))
         dayLabelIds.forEachIndexed { index, id ->
@@ -199,8 +196,6 @@ private fun WeekGrid(
         }
     }
 
-    // One detector for the whole grid: after a long press, dragging paints every
-    // cell crossed. Plain taps still reach each cell's own toggleable.
     val current by rememberUpdatedState(schedule)
     Column(
         Modifier
@@ -217,8 +212,7 @@ private fun WeekGrid(
                     if (row !in 0 until AvailabilitySchedule.HOURS_PER_DAY) return null
                     return AvailabilitySchedule.DAYS[col] to row
                 }
-                // The first cell is painted only once the finger moves, so a long
-                // press that never drags stays a plain toggle.
+                // Painting starts once the finger moves, so a long press alone stays a plain toggle.
                 var paintValue = false
                 detectDragGesturesAfterLongPress(
                     onDragStart = { start ->
@@ -241,8 +235,6 @@ private fun WeekGrid(
                     .padding(vertical = CellVerticalPadding),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Label every 3rd hour only: 24 numbers in a column is unreadable,
-                // and the gaps still give the eye a scale to count from.
                 Text(
                     if (hour % 3 == 0) "%02d".format(hour) else "",
                     modifier = Modifier.width(HourGutterWidth),

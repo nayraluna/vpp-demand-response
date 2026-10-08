@@ -22,7 +22,6 @@ class ParticipationViewModel @Inject constructor(
         refresh()
     }
 
-    /** Re-reads the history from the VPP. */
     fun refresh() {
         _uiState.value = ParticipationUiState(isLoading = true)
         viewModelScope.launch {

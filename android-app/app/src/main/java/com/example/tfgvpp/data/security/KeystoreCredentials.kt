@@ -13,21 +13,9 @@ import javax.inject.Singleton
 @Singleton
 class KeystoreCredentials @Inject constructor() {
 
-    /** New EC P-256 key pair inside the Android Keystore (replaces any
-     *  previous one under the same alias; the RA refuses re-enrolling an old
-     *  key anyway).
-     *
-     *  EC instead of RSA on purpose: TLS client authentication with Keystore
-     *  RSA keys proved unusable on some vendor TEEs -- the native keystore
-     *  engine fails, TLS negotiates PSS even on 1.2, and the KeyMint refuses
-     *  the raw operation (INCOMPATIBLE_PADDING_MODE) that would serve it.
-     *  ECDSA has none of those failure modes and is the best-exercised
-     *  Keystore path across devices. The user's artefacts are then signed
-     *  ES256 (the platform accepts ES256 and RS256 alike).
-     *
-     *  Digests: SHA256 for CSR/JWS (hashed inside the Keystore); NONE for the
-     *  TLS handshake, where Conscrypt pre-hashes and requests a raw ECDSA
-     *  signature. */
+    /** New EC P-256 key pair in the Android Keystore, so the private key is non-exportable. EC, not RSA:
+     *  Keystore RSA TLS client auth failed on some vendor TEEs. DIGEST_NONE because Conscrypt pre-hashes
+     *  for the TLS handshake. */
     fun generateKeyPair(): KeyPair {
         val generator = KeyPairGenerator.getInstance(
             KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEYSTORE)
@@ -39,13 +27,11 @@ class KeystoreCredentials @Inject constructor() {
         return generator.generateKeyPair()
     }
 
-    /** The persisted private key, or null if the Keystore entry is gone. */
     fun loadPrivateKey(): PrivateKey? {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         return keyStore.getKey(KEY_ALIAS, null) as? PrivateKey
     }
 
-    /** Deletes the Keystore entry (logout). */
     fun clear() {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         if (keyStore.containsAlias(KEY_ALIAS)) keyStore.deleteEntry(KEY_ALIAS)

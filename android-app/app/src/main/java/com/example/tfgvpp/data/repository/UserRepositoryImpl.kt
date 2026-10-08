@@ -34,10 +34,7 @@ class UserRepositoryImpl @Inject constructor(
     override suspend fun register(identity: EidIdentity?): Result<User> =
         withContext(io) {
             runCatching {
-                // The certified CN is the real DNI after a DNIe login (U1);
-                // otherwise a throwaway test identity (the emulator has no NFC).
-                // TODO(TFG): pseudonymous CN — certify a derived identifier
-                // instead of the raw DNI, keeping the DNI only at the RA.
+                // The real DNI after a DNIe login, else a throwaway test identity (the emulator has no NFC).
                 val cn = identity?.dni
                     ?: ("android-" + List(6) { "0123456789abcdef".random() }.joinToString(""))
                 val client = RegistrationClient(ca.newInputStream())

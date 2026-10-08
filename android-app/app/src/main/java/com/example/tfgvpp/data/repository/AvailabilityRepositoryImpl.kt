@@ -35,8 +35,7 @@ class AvailabilityRepositoryImpl @Inject constructor(
     override suspend fun updateSchedule(schedule: AvailabilitySchedule): Result<Unit> =
         withContext(io) {
             runCatching {
-                // The owner-signed, versioned calendar goes to the VPP only;
-                // the appliance retrieves it through its own outbound polling.
+                // The signed calendar goes to the VPP only; the appliance fetches it by polling.
                 val client = OperationalClient(ca.newInputStream(), sessionManager.require())
                 client.declareAvailability(
                     endpoints.mtlsUrl, schedule.applianceVen, schedule.toBitmaps(),

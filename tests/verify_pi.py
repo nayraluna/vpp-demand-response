@@ -20,14 +20,8 @@ ROOT = Path(__file__).resolve().parent.parent
 CERTS = ROOT / "certs"
 CA_FILE = str(CERTS / "CA.crt")
 
-# Both addresses are site-specific, so they are taken from the command line or
-# the environment rather than baked in:
-#
-#   python tests/verify_pi.py http://<pi-address>:8082 <this-pc-lan-address>
-#   TFG_PI_URL=http://raspberrypi.local:8082 TFG_LAN_HOST=192.168.1.50 python tests/verify_pi.py
-#
-# <this-pc-lan-address> must be in the VPP certificate SAN, see EXTRA_SAN_IPS
-# in provision_all.py.
+# Site-specific, so taken from argv or the environment. The LAN address must be
+# in the VPP certificate SAN (EXTRA_SAN_IPS in provision_all.py).
 PI = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("TFG_PI_URL", "http://raspberrypi.local:8082")
 LAN = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("TFG_LAN_HOST", "")
 
@@ -40,8 +34,8 @@ if not LAN:
         + "  or set TFG_LAN_HOST=<lan-address>"
     )
 
-VPP, MTLS = "https://127.0.0.1:8080", "https://127.0.0.1:8443"  # from this PC
-VPP_FOR_PI = f"https://{LAN}:8080"                              # from the Pi
+VPP, MTLS = "https://127.0.0.1:8080", "https://127.0.0.1:8443"
+VPP_FOR_PI = f"https://{LAN}:8080"
 MTLS_FOR_PI = f"https://{LAN}:8443"
 
 sys.path.insert(0, str(ROOT / "backoffice"))
@@ -104,9 +98,7 @@ def reset_operational_state():
 
 
 def current_window(slots: int = 4) -> dict:
-    """A window covering *now* in UTC, started one slot early where possible
-    so that a small clock skew between this PC and the Pi cannot leave the
-    Pi's own wall clock outside the window."""
+    """Covers *now* (UTC), started a slot early so clock skew with the Pi stays inside it."""
     now = datetime.datetime.now(datetime.timezone.utc)
     now_slot = now.hour * 2 + now.minute // 30
     start = max(0, min(now_slot, av.SLOTS_PER_DAY - slots) - 1)
@@ -115,11 +107,7 @@ def current_window(slots: int = 4) -> dict:
 
 
 def wait_until(probe, timeout_s: int = 90, step_s: int = 3):
-    """Poll `probe` until it returns a truthy value or the timeout expires.
-
-    The Pi polls the VTN on its own periodic loop, so the gate asserts on
-    OUTCOMES (status, participation) rather than on which poll consumed the
-    activation - the manual /poll just accelerates the happy path."""
+    """The Pi polls on its own loop, so gates wait for outcomes rather than for a given poll."""
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         value = probe()
@@ -170,7 +158,7 @@ def main():
         else die(f"unexpected {bound}")
 
     print("G4: the signed calendar is declared at the VPP and adopted by the Pi")
-    week = {d: "1" * av.SLOTS_PER_DAY for d in av.DAYS}  # this gate tests the flow
+    week = {d: "1" * av.SLOTS_PER_DAY for d in av.DAYS}
     cal_version = int(time.time() * 1000)
     r = requests.post(f"{MTLS}/availability",
                       json={"ven": ven,
@@ -180,7 +168,6 @@ def main():
     ok(f"VPP: {r.json()['status']} ({r.json()['declared_slots']} slots, "
        f"version {r.json()['version']})") \
         if r.ok and r.json()["status"] == "declared" else die(f"{r.status_code} {r.text}")
-    # The Pi retrieves the owner-signed calendar through its own outbound poll.
     requests.post(f"{PI}/poll", timeout=20)
     adopted = wait_until(lambda: (lambda s: s if s.get("availability_version") ==
                                   cal_version else None)(
@@ -189,8 +176,6 @@ def main():
         if adopted else die("the Pi never adopted the signed calendar")
 
     print("G5: the Pi registers itself with the VTN (no external trigger)")
-    # A poll cycle registers first if needed; the Pi's own periodic loop may
-    # already have done it. Either way, the registration must be its own doing.
     requests.post(f"{PI}/poll", timeout=20)
     reg = wait_until(lambda: requests.get(f"{PI}/status", timeout=10)
                      .json().get("registration"), timeout_s=30)
@@ -208,8 +193,6 @@ def main():
         die(f"/dr/activate -> {r.status_code} {r.text}")
     ok(f"activated: {[a['activation_id'] for a in r.json()['activations']]}")
 
-    # The Pi pulls OUTBOUND over mutual TLS - through its own periodic loop or
-    # through this manual acceleration, whichever comes first - and executes.
     requests.post(f"{PI}/poll", timeout=20)
     st = wait_until(lambda: (lambda s: s if s.get("executed_count", 0) >= 1 else None)(
         requests.get(f"{PI}/status", timeout=10).json()))
@@ -221,7 +204,6 @@ def main():
     ok("a further poll returns nothing (delivered exactly once)") \
         if r["polled"] == 0 else die(f"second poll -> {r}")
 
-    # Evidence is signed on the Pi (its HSM) and submitted outbound.
     requests.post(f"{PI}/evidence", timeout=20)
     part = wait_until(lambda: (lambda b: b if b.get("count", 0) >= 1 else None)(
         requests.get(f"{MTLS}/participation", cert=uclient, verify=CA_FILE).json()))

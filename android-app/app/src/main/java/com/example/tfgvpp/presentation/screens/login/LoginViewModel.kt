@@ -20,17 +20,14 @@ class LoginViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
-    /** Called with the identity DnieLoginActivity returned (requirement U1). */
     fun onDnieIdentity(holderName: String, dni: String) {
         _uiState.update { it.copy(identity = EidIdentity(holderName, dni)) }
     }
 
-    /** Discards the DNIe identity (register with a test identity instead). */
     fun clearIdentity() {
         _uiState.update { it.copy(identity = null) }
     }
 
-    /** Issues the credential and enrolls at the VPP. */
     fun register() {
         if (_uiState.value.isRegistering) return
         _uiState.update { it.copy(isRegistering = true, error = null) }

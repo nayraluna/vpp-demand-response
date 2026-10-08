@@ -12,8 +12,7 @@ import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// Migrates from the SharedPreferences file older versions of the app used, so
-// an existing install keeps its credential across the update.
+// Migration from the SharedPreferences file older installs used, so they keep their credential.
 private val Context.sessionDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "tfg_session",
     produceMigrations = { context ->
@@ -25,7 +24,7 @@ private val Context.sessionDataStore: DataStore<Preferences> by preferencesDataS
 class SessionStore @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
-    /** The persisted public half of the session. */
+    /** The public half of the session; the private key stays in the Keystore. */
     data class PersistedSession(
         val userCertPem: String,
         val vppCertPem: String,
@@ -35,7 +34,6 @@ class SessionStore @Inject constructor(
         val dni: String?,
     )
 
-    /** The stored session, or null if nothing was persisted. */
     suspend fun load(): PersistedSession? {
         val p = context.sessionDataStore.data.first()
         return PersistedSession(
@@ -48,7 +46,6 @@ class SessionStore @Inject constructor(
         )
     }
 
-    /** Persists the session's public material after a successful registration. */
     suspend fun save(session: PersistedSession) {
         context.sessionDataStore.edit { p ->
             p[USER_CERT] = session.userCertPem
@@ -64,19 +61,16 @@ class SessionStore @Inject constructor(
     suspend fun applianceUrl(): String? =
         context.sessionDataStore.data.first()[APPLIANCE_URL]
 
-    /** Remembers the appliance URL the user last paired against. */
     suspend fun saveApplianceUrl(url: String) {
         context.sessionDataStore.edit { it[APPLIANCE_URL] = url }
     }
 
-    /** Forgets everything (logout). */
     suspend fun clear() {
         context.sessionDataStore.edit { it.clear() }
     }
 
     private companion object {
-        // Key names match the old SharedPreferences file, so the DataStore
-        // migration picks existing values up unchanged.
+        // Key names match the old SharedPreferences file so the migration picks them up.
         val USER_CERT = stringPreferencesKey("user_cert")
         val VPP_CERT = stringPreferencesKey("vpp_cert")
         val RA_SERIAL = stringPreferencesKey("ra_serial")

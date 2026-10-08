@@ -47,8 +47,7 @@ def reset_operational_state():
     with sqlite3.connect(str(DB_FILE)) as c:
         c.execute("DELETE FROM evidence")
         c.execute("DELETE FROM activations")
-        # A synthetic population left by the backoffice would absorb the
-        # selection instead of the real appliance under test.
+        # A leftover synthetic population would absorb the selection instead of the real appliance.
         c.execute("DELETE FROM availability WHERE ven_subject LIKE 'CN=syn-%'")
         c.execute("DELETE FROM appliances WHERE ven_subject LIKE 'CN=syn-%'")
         c.execute("DELETE FROM users WHERE subject LIKE 'CN=syn-user-%'")
@@ -87,7 +86,6 @@ def sign_as(key, cert_pem: str, payload: dict, typ: str) -> str:
 
 
 def full_calendar() -> dict:
-    """Full availability: this gate is about remuneration, not the calendar."""
     return {day: "1" * av.SLOTS_PER_DAY for day in av.DAYS}
 
 
@@ -107,8 +105,7 @@ def onboard(key, cert_pem, client, calendar) -> str:
     proof = requests.post(f"{APP}/pair", json={"jws": bundle}).json()["owner_proof"]
     ven = requests.post(f"{MTLS}/appliances/owner-proof", json={"owner_proof": proof},
                         cert=client, verify=CA_FILE).json()["ven"]
-    # No VEN registration and no calendar delivery here: the appliance obtains
-    # both autonomously through its first outbound poll.
+    # Registration and calendar delivery happen on the appliance's own first poll.
     requests.post(
         f"{MTLS}/availability",
         json={"ven": ven,
@@ -122,7 +119,6 @@ def onboard(key, cert_pem, client, calendar) -> str:
 def main():
     try:
         print("G1: the arithmetic, checked independently of the server")
-        # 2000 W shed by 50% for 2 h -> 1000 W x 2 h = 2 kWh
         kwh = remuneration.energy_not_consumed_kwh(
             2000, 50, av.slot_index(15), av.slot_index(17))
         ok(f"2000 W at 50% for 2 h -> {kwh} kWh") if kwh == 2.0 \
@@ -130,7 +126,6 @@ def main():
         eur = remuneration.reward_eur(kwh, 0.15)
         ok(f"at 0.15 EUR/kWh -> {eur} EUR") if eur == 0.3 \
             else die(f"expected 0.3 EUR, got {eur}")
-        # A full shutdown sheds the whole nominal power.
         kwh_off = remuneration.energy_not_consumed_kwh(
             2000, 100, av.slot_index(15), av.slot_index(16))
         ok(f"a shutdown for 1 h sheds the full 2000 W -> {kwh_off} kWh") \
@@ -150,7 +145,7 @@ def main():
             else die(f"expected zero, got {body}")
 
         print("G3: after a verified curtailment the owner sees what they earned")
-        # The window covers *now* and lasts 2 h -> the 2.0 kWh checked below.
+        # Four slots, 2 h: the 2.0 kWh checked below.
         requests.post(f"{MTLS}/dr/activate",
                       json={"power_w": 1000, **current_window(),
                             "action": "reduce"},
@@ -175,7 +170,7 @@ def main():
             else die(f"totals wrong: {body}")
 
         print("G4: an activation without verified evidence earns nothing")
-        # Issue an activation directly, and never submit evidence for it.
+        # Planted directly so no evidence ever exists for it.
         with sqlite3.connect(str(DB_FILE)) as c:
             c.execute(
                 """INSERT INTO activations(activation_id, ven_subject, day,

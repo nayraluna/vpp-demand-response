@@ -17,9 +17,8 @@ CA = "https://127.0.0.1:8081"
 sys.path.insert(0, str(ROOT / "appliance"))
 import hsm  # noqa: E402
 
-# The VPP no longer exposes a signing endpoint (it would be an unauthenticated
-# signing oracle), so its signing identity is exercised in-process. Loaded by
-# file path because both the appliance and the VPP have an `app` package.
+# The VPP exposes no signing endpoint (it would be a signing oracle), so its identity
+# is exercised in-process; loaded by path because both sides have an `app` package.
 _spec = importlib.util.spec_from_file_location(
     "vpp_crypto_service", ROOT / "vpp-server" / "app" / "crypto_service.py")
 vpp_crypto = importlib.util.module_from_spec(_spec)
@@ -73,8 +72,7 @@ def main():
         die("VPP certificate accepted by the public trust store")
     except requests.exceptions.SSLError:
         ok("VPP rejected without our CA (as expected)")
-    # Signing identity: in-process round trip (that the RUNNING server holds
-    # vpp.key is what the mutual-TLS gate proves at the handshake).
+    # In-process; that the running server holds vpp.key is what the mTLS gate proves.
     vpp_crypto.initialize()
     vpp_cert = x509.load_pem_x509_certificate(vpp_crypto.certificate_pem().encode())
     if chains_to_ca(vpp_cert, ca):

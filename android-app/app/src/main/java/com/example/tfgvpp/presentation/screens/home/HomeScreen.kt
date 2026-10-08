@@ -177,7 +177,6 @@ private fun ApplianceCard(appliance: Appliance, onClick: () -> Unit) {
     }
 }
 
-/** Status pill: the availability state is the one thing that varies per card. */
 @Composable
 private fun AvailabilityPill(declared: Boolean) {
     Surface(

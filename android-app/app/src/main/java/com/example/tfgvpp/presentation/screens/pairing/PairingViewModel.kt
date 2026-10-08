@@ -27,7 +27,6 @@ class PairingViewModel @Inject constructor(
 
     private var lastPairing: PairingInfo? = null
 
-    /** Result of the QR scan; ignores cancellations, flags non-URLs. */
     fun onQrScanned(contents: String?) {
         if (contents == null) return // scan cancelled
         val info = PairingInfo.fromQr(contents)
@@ -41,14 +40,13 @@ class PairingViewModel @Inject constructor(
         enroll(info)
     }
 
-    /** Enrolls against the appliance emulated on the PC (no QR needed). */
+    /** The appliance emulated on the PC, no QR needed. */
     fun useDevelopmentAppliance() = enroll(PairingInfo(endpoints.defaultApplianceUrl))
 
     fun retry() {
         lastPairing?.let(::enroll)
     }
 
-    /** Returns the appliance to state 0 (it answered 409: already paired). */
     fun factoryReset() {
         val pairing = lastPairing ?: return
         viewModelScope.launch {

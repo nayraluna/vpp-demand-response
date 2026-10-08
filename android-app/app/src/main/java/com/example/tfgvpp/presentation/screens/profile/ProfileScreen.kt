@@ -101,7 +101,6 @@ fun ProfileScreen(
         ) {
             val user = uiState.user
             if (user != null) {
-                // Identity header: who this credential belongs to.
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -131,7 +130,6 @@ fun ProfileScreen(
                     }
                 }
 
-                // Credential block: the certificate facts, grouped.
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(vertical = 4.dp)) {
                         InfoRow(
@@ -165,8 +163,6 @@ fun ProfileScreen(
             }
 
             Spacer(Modifier.height(8.dp))
-            // Outlined, not filled: destructive but not the screen's main action
-            // (the AlertDialog is where the consequence is spelled out).
             OutlinedButton(
                 onClick = { confirmLogout = true },
                 modifier = Modifier.fillMaxWidth().height(52.dp),

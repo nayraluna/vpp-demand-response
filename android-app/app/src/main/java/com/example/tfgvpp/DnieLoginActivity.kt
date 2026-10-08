@@ -23,10 +23,8 @@ import kotlinx.coroutines.withContext
 class DnieLoginActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     companion object {
-        /** ActivityResult extra: holder's full name as read from the card. */
         const val EXTRA_HOLDER = "com.example.tfgvpp.dnie.HOLDER"
 
-        /** ActivityResult extra: DNI as read from the card. */
         const val EXTRA_DNI = "com.example.tfgvpp.dnie.DNI"
     }
 
@@ -39,12 +37,10 @@ class DnieLoginActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private lateinit var dnieAuth: DnieAuth
     private var nfcAdapter: NfcAdapter? = null
 
-    // Kept after a successful login so "use this identity" can hand it to the
-    // registration step (the CSR's CN becomes the holder's DNI).
+    // Handed to registration on "use this identity": the CSR's CN becomes the DNI.
     private var lastResult: DnieAuth.Result? = null
 
-    // onTagDiscovered runs on a binder thread, so the CAN is mirrored here instead
-    // of being read off the EditText from a background thread.
+    // onTagDiscovered runs on a binder thread, so the CAN is mirrored here, not read off the EditText.
     @Volatile private var can: String = ""
     @Volatile private var busy = false
 
@@ -68,7 +64,6 @@ class DnieLoginActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             }
         }
 
-        // The invisible EditText owns the input; the six cells just render it.
         canInput.doAfterTextChanged { text ->
             val digits = text?.toString()?.trim().orEmpty()
             can = digits
@@ -79,7 +74,7 @@ class DnieLoginActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
         dnieAuth = DnieAuth(resources.openRawResource(R.raw.ac_raiz_dnie2))
 
-        // The SDK shows its own PIN dialog; it needs a context to attach to.
+        // The SDK's own PIN dialog needs a context to attach to.
         PasswordUI.setAppContext(this)
         PasswordUI.setPasswordDialog(null) // null = the SDK's default dialog
 
@@ -93,10 +88,7 @@ class DnieLoginActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         super.onResume()
         val adapter = nfcAdapter ?: return
 
-        // Having NFC hardware is not enough: with NFC switched OFF in system
-        // settings, reader mode silently never fires onTagDiscovered -- the
-        // classic "I type the CAN and nothing happens". Detect it and offer
-        // the settings screen; coming back re-runs this check.
+        // With NFC switched off, reader mode silently never fires onTagDiscovered.
         if (!adapter.isEnabled) {
             setStatus("NFC is OFF — tap here to open settings and enable it.")
             status.setOnClickListener { startActivity(Intent(Settings.ACTION_NFC_SETTINGS)) }
@@ -133,9 +125,7 @@ class DnieLoginActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         lifecycleScope.launch {
             setStatus("Reading the DNIe… keep the card still")
             try {
-                // Card I/O and the blocking PIN dialog must not run on the main thread.
-                // The certificate block is shown as soon as it is read (CAN only);
-                // the PIN is only needed afterwards, for the proof of possession.
+                // Card I/O and the PIN dialog block; the certificate is shown as soon as it is read.
                 val r = withContext(Dispatchers.IO) {
                     dnieAuth.authenticate(tag, can) { info -> showCardInfo(info) }
                 }
@@ -144,9 +134,7 @@ class DnieLoginActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 setStatus("DNIe LOCKED")
                 append("PIN attempt limit reached: unlock the card at a DNIe update point.")
             } catch (e: Exception) {
-                // "Tag ... is out of date" = the card lost RF contact mid-operation
-                // (typically while typing the PIN); the stale handle is unusable.
-                // No PIN attempt is consumed: the PIN never reached the card.
+                // "out of date" = the card lost RF contact; the PIN never reached it, no attempt used.
                 val tagLost = generateSequence<Throwable>(e) { it.cause }.any {
                     it is android.nfc.TagLostException ||
                         it.message?.contains("out of date") == true
@@ -165,7 +153,6 @@ class DnieLoginActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
     }
 
-    /** First block: everything knowable WITHOUT the PIN (read via CAN/PACE). */
     private fun showCardInfo(i: DnieAuth.CardInfo) {
         setStatus("Certificate read — enter the PIN to prove possession")
         append("Holder:  ${i.holderName}")
@@ -174,7 +161,6 @@ class DnieLoginActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         append("  not expired: ${mark(i.notExpired)}")
     }
 
-    /** Second block: what required the PIN (signature with the card's private key). */
     private fun showPossession(r: DnieAuth.Result) {
         setStatus(if (r.allPassed) "SIGNED IN — ${r.holderName}" else "SIGN-IN FAILED")
         append("  possession proof (signature): ${mark(r.proofOfPossession)}")

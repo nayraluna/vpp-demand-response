@@ -158,24 +158,15 @@ private fun TotalsCard(totalKwh: Double, totalEur: Double, price: Double) {
     }
 }
 
-/** Beyond this the columns are too narrow to label on a phone. */
 private const val MAX_BARS = 8
 
-/**
- * Bar chart of the energy saved per event. Pure layout, no chart library: one
- * weighted column each, height proportional to its kWh. The scale is relative
- * to the tallest bar SHOWN, so the chart compares events against each other,
- * not against an absolute maximum.
- */
 @Composable
 private fun SavingsChart(records: List<ParticipationRecord>) {
-    // Records arrive newest-first; the chart reads left-to-right chronologically.
+    // Records arrive newest-first; the chart reads chronologically.
     val bars = records.take(MAX_BARS).reversed()
     val maxKwh = bars.maxOf { it.energyKwh }.coerceAtLeast(0.01)
 
-    // The wire "day" is a recurring weekday key, identical for every Thursday,
-    // so the axis carries the execution date instead -- printed only where it
-    // changes, which is what marks one day's events off from the next.
+    // The wire "day" is a weekday key, so the axis carries the date, printed only where it changes.
     val dates = bars.map { shortLocalDate(it.executedAt) }
     val axis = dates.mapIndexed { i, date ->
         if (i > 0 && date == dates[i - 1]) "" else date
@@ -207,7 +198,6 @@ private fun SavingsChart(records: List<ParticipationRecord>) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Bottom,
                     ) {
-                        // Never wrap: a second line would eat the bar's height.
                         Text(
                             "%.1f".format(record.energyKwh),
                             style = MaterialTheme.typography.labelSmall,

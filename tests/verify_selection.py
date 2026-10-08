@@ -52,7 +52,6 @@ def appliance(name, power, max_curtail=240, recovery=30, slots=None, last_end=No
             "last_activation_end": last_end}
 
 
-# ----------------------------------------------------------------- Part A ---
 def part_a():
     print("A1: the request is covered with the fewest appliances")
     fleet = [appliance("ac-1", 2000), appliance("fridge-1", 500),
@@ -109,17 +108,13 @@ def part_a():
         if r["selected"] == [] else die("appliances selected despite infeasibility")
 
 
-# ----------------------------------------------------------------- Part B ---
 def reset_operational_state():
-    """Test setup: drop activations/evidence left by an earlier run, so the
-    appliance is not still inside a previous recovery window (which selection
-    would correctly refuse) and the suite stays repeatable."""
+    """Drop earlier runs' activations, or selection refuses an appliance still in recovery."""
     import sqlite3
     with sqlite3.connect(str(ROOT / "vpp-server" / "vpp.db")) as c:
         c.execute("DELETE FROM evidence")
         c.execute("DELETE FROM activations")
-        # A synthetic population left by the backoffice would absorb the
-        # selection instead of the real appliance under test.
+        # A leftover synthetic population would absorb the selection instead of the real appliance.
         c.execute("DELETE FROM availability WHERE ven_subject LIKE 'CN=syn-%'")
         c.execute("DELETE FROM appliances WHERE ven_subject LIKE 'CN=syn-%'")
         c.execute("DELETE FROM users WHERE subject LIKE 'CN=syn-user-%'")
@@ -184,8 +179,7 @@ def part_b():
     week["mon"] = "0" * start + "1" * (end - start) + "0" * (av.SLOTS_PER_DAY - end)
     ven = bind_and_declare(ukey, ucert, uclient, week)
 
-    # Inside the declared window, and exactly the appliance's max curtailment
-    # time (120 min) - the boundary case must still be eligible.
+    # Exactly the appliance's max curtailment time: the boundary must still be eligible.
     request = {"power_w": 1000, "day": "mon",
                "slot_start": start, "slot_end": av.slot_index(17)}
     r = requests.post(f"{MTLS}/dr/select", json=request, cert=uclient, verify=CA_FILE)

@@ -34,7 +34,6 @@ class AvailabilityViewModel @Inject constructor(
                     _uiState.update { it.copy(isLoading = false, schedule = schedule) }
                 }
                 .onFailure { e ->
-                    // Editing starts from an empty grid if the fetch failed.
                     _uiState.update {
                         it.copy(
                             isLoading = false,
@@ -46,28 +45,24 @@ class AvailabilityViewModel @Inject constructor(
         }
     }
 
-    /** Flips one hour cell of the grid. */
     fun toggle(day: String, hour: Int) {
         _uiState.update { state ->
             state.copy(schedule = state.schedule?.toggled(day, hour))
         }
     }
 
-    /** Sets one cell to a fixed value; drag-to-paint calls this per cell crossed. */
     fun paint(day: String, hour: Int, available: Boolean) {
         _uiState.update { state ->
             state.copy(schedule = state.schedule?.withHour(day, hour, available))
         }
     }
 
-    /** Fills the whole day, or clears it when every hour was already set. */
     fun toggleDay(day: String) {
         _uiState.update { state ->
             state.copy(schedule = state.schedule?.dayToggled(day))
         }
     }
 
-    /** Declares the calendar at the VPP, signed with the user's credential. */
     fun save() {
         val schedule = _uiState.value.schedule ?: return
         if (_uiState.value.isSaving) return

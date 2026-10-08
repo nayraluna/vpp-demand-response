@@ -66,9 +66,7 @@ def make_jws(key, cert_pem: str, payload: dict) -> str:
 
 
 def fake_platform():
-    """A whole platform of someone else's: its own root, a user and a VPP
-    certified under it. Internally consistent, and worth nothing to a device
-    that left the factory with the real root."""
+    """Another root with a user and a VPP under it: internally consistent, worthless to the device."""
     def make(subject, issuer_name, issuer_key, key, ca):
         now = datetime.datetime.now(datetime.timezone.utc)
         b = (x509.CertificateBuilder().subject_name(subject).issuer_name(issuer_name)
@@ -90,10 +88,7 @@ def fake_platform():
 
 
 def expired_from_ca(cn: str):
-    """A certificate the CA really signed, whose validity ended yesterday. The
-    CA key is read here only to mint this fixture, which the CA itself would
-    never issue: the gate is about the appliance's verifier, which must not
-    accept a genuine signature past its date."""
+    """Minted with the CA key: a fixture the CA itself would never issue."""
     ca = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
     ca_key = serialization.load_pem_private_key((Path(CA_FILE).parent / "CA.key").read_bytes(), None)
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -113,8 +108,7 @@ def expired_from_ca(cn: str):
 
 
 def bundle() -> dict:
-    """What the app sends: how to reach the VPP. NOT the appliance parameters -
-    those are device properties the appliance itself reports back."""
+    """How to reach the VPP; the appliance reports its own parameters."""
     return {
         "vpp_url": "https://127.0.0.1:8080",
         "vpp_mtls_url": "https://127.0.0.1:8443",
@@ -143,10 +137,8 @@ def main():
     ok("owner not certified by the CA rejected (400)") if r.status_code == 400 \
         else die(f"expected 400, got {r.status_code}")
 
-    # The LAN attack: a bundle that is consistent under a root the attacker
-    # made, offering that root as cert_ra. When the anchor was taken from the
-    # bundle this passed every check. The device trusts only the root it was
-    # provisioned with and ignores the field, so the fake platform is refused.
+    # Consistent under the attacker's own root, offered as cert_ra: the device
+    # trusts only the root it was provisioned with and ignores the field.
     froot, fkey, fuser, fvpp = fake_platform()
     fake = {**bundle(), "cert_ra": froot, "cert_vpp": fvpp}
     r = requests.post(f"{APP}/pair", json={"jws": make_jws(fkey, fuser, fake)})
@@ -156,8 +148,6 @@ def main():
     ok("appliance still unpaired after the attempt") if r.json()["state"] == 0 \
         else die("the fake platform paired the appliance")
 
-    # Genuinely issued by the CA, expired yesterday. The signature verifies,
-    # the date does not, and the device must look at both.
     ekey, ecert = expired_from_ca(f"expired-{secrets.token_hex(3)}")
     r = requests.post(f"{APP}/pair", json={"jws": make_jws(ekey, ecert, bundle())})
     ok(f"expired owner certificate rejected (400): {r.json().get('detail', '')}") \

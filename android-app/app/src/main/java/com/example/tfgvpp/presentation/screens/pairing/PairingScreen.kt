@@ -180,7 +180,6 @@ private fun StepList(uiState: PairingUiState) {
                     )
                     current -> CircularProgressIndicator(
                         modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    // Pending steps stay visible as a dot.
                     else -> Box(
                         Modifier
                             .size(10.dp)

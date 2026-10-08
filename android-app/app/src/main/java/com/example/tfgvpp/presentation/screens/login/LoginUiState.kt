@@ -3,8 +3,8 @@ package com.example.tfgvpp.presentation.screens.login
 import com.example.tfgvpp.domain.model.EidIdentity
 
 data class LoginUiState(
-    val identity: EidIdentity? = null, // proven by the DNIe login, if it ran
+    val identity: EidIdentity? = null,
     val isRegistering: Boolean = false,
-    val registered: Boolean = false,   // the screen navigates to Home on this
+    val registered: Boolean = false,
     val error: String? = null,
 )

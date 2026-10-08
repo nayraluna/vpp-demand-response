@@ -41,7 +41,6 @@ def chains_to_ca(cert, ca) -> bool:
 
 
 def ra_issued_user_cert(cn: str):
-    """Entity-side: generate a key locally and get a user cert from the RA."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     csr = (
         x509.CertificateSigningRequestBuilder()
@@ -72,11 +71,7 @@ def self_signed(cn: str) -> str:
 
 
 def signed_by_ca(cn: str, days_ago: int = 0):
-    """A certificate the CA really signed, outside its register. The CA key is
-    read here only to mint fixtures the CA itself would refuse to issue: one
-    whose validity ended `days_ago` days ago, or a second one for a name that
-    already has a live certificate. The gates are about the VPP's verifier,
-    which must not lean on the CA's policy alone."""
+    """Minted with the CA key: fixtures the CA itself would refuse to issue."""
     ca = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
     ca_key = serialization.load_pem_private_key((Path(CA_FILE).parent / "CA.key").read_bytes(), None)
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)

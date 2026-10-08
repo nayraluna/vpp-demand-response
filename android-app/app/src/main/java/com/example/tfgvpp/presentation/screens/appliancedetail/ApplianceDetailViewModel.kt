@@ -18,7 +18,7 @@ class ApplianceDetailViewModel @Inject constructor(
     private val getApplianceDetail: GetApplianceDetailUseCase,
 ) : ViewModel() {
 
-    /** VEN subject from the route (Navigation already URL-decoded it). */
+    /** From the route; Navigation already URL-decoded it. */
     val ven: String = checkNotNull(savedStateHandle[Route.ARG_VEN])
 
     private val _uiState = MutableStateFlow(ApplianceDetailUiState())

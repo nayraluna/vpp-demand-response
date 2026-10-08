@@ -43,17 +43,11 @@ def die(msg):
 
 
 def reset_operational_state():
-    """Test setup: drop activations/evidence left by an earlier run.
-
-    Without this the appliance would still be inside the recovery window of a
-    previous activation, and participant selection would (correctly) refuse to
-    activate it - making the suite non-repeatable.
-    """
+    """Drop earlier runs' activations, or selection refuses an appliance still in recovery."""
     with sqlite3.connect(str(DB_FILE)) as c:
         c.execute("DELETE FROM evidence")
         c.execute("DELETE FROM activations")
-        # A synthetic population left by the backoffice would absorb the
-        # selection instead of the real appliance under test.
+        # A leftover synthetic population would absorb the selection instead of the real appliance.
         c.execute("DELETE FROM availability WHERE ven_subject LIKE 'CN=syn-%'")
         c.execute("DELETE FROM appliances WHERE ven_subject LIKE 'CN=syn-%'")
         c.execute("DELETE FROM users WHERE subject LIKE 'CN=syn-user-%'")
@@ -94,7 +88,6 @@ def sign_as(key, cert_pem: str, payload: dict, typ: str) -> str:
 
 
 def full_calendar() -> dict:
-    """Full availability: this gate is about evidence, not the calendar."""
     return {day: "1" * av.SLOTS_PER_DAY for day in av.DAYS}
 
 
@@ -107,8 +100,7 @@ def current_window(slots: int = 4) -> dict:
 
 
 def onboard(key, cert_pem, client, calendar) -> str:
-    # Every step is checked: a silent failure here surfaces later as an empty
-    # evidence submission whose real cause is impossible to reconstruct.
+    # Every step is checked: a silent failure here would surface as an empty evidence submission.
     r = requests.post(f"{APP}/factory-reset")
     if not r.ok:
         die(f"appliance /factory-reset -> {r.status_code} {r.text}")
@@ -124,8 +116,7 @@ def onboard(key, cert_pem, client, calendar) -> str:
     if not r.ok:
         die(f"owner proof -> {r.status_code} {r.text}")
     ven = r.json()["ven"]
-    # No VEN registration and no calendar delivery here: the appliance obtains
-    # both autonomously through its first outbound poll.
+    # Registration and calendar delivery happen on the appliance's own first poll.
     r = requests.post(
         f"{MTLS}/availability",
         json={"ven": ven,
@@ -146,8 +137,6 @@ def main():
         ven = onboard(ukey, ucert, uclient, calendar)
         _k, _c, operator = ra_identity(f"dr-{secrets.token_hex(3)}", "role=operator")
 
-        # Activate for the window that covers *now* (2 h -> the 2.0 kWh below),
-        # and let the appliance retrieve and execute it.
         r = requests.post(f"{MTLS}/dr/activate",
                           json={"power_w": 1000, **current_window(),
                                 "action": "reduce"},
@@ -164,8 +153,6 @@ def main():
         r = requests.post(f"{APP}/evidence")
         body = r.json()
         if not body["submitted"]:
-            # The poll outcome carries the refusal reason (or the calendar
-            # rejection) that explains an empty submission.
             die(f"nothing submitted: {body} (poll outcome: {poll})")
         ok(f"evidence accepted for {body['submitted'][0]['activation_id']} "
            f"({body['submitted'][0]['reduction_pct']}% reduction)") \
@@ -182,7 +169,6 @@ def main():
         ok("the JWS signature is kept verbatim (owner proof discards its own)") \
             if row[2].count(".") == 2 and len(row[2]) > 100 \
             else die("signature not stored")
-        # And it still verifies out of the database - it is auditable later.
         hdr = jwt.get_unverified_header(row[2])
         ven_cert = x509.load_der_x509_certificate(base64.b64decode(hdr["x5c"][0]))
         pub = ven_cert.public_key().public_bytes(
@@ -208,8 +194,7 @@ def main():
             if r.status_code == 409 else die(f"expected 409, got {r.status_code}")
 
         print("G5: evidence must match the activation it claims")
-        # A genuine appliance signature over an activation that was issued to
-        # ANOTHER appliance: knowing an identifier must not be enough.
+        # Genuinely signed over another appliance's activation: knowing the id must not be enough.
         sys.path.insert(0, str(ROOT / "appliance"))
         import hsm
         hsm.initialize()

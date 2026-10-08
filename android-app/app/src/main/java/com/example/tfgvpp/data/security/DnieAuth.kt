@@ -31,16 +31,12 @@ class DnieAuth(dnieRootInput: InputStream) {
         val certSubject: String,
         val certIssuer: String,
         val chainLength: Int,
-        val chainsToDnieRoot: Boolean, // PKIX path validation up to AC RAIZ DNIE 2
-        val notExpired: Boolean,       // certificate is inside its validity window
-        val proofOfPossession: Boolean,// the card signed our fresh nonce
-        val tamperRejected: Boolean,   // a modified nonce must NOT verify
-        val authCertPem: String,       // ready to send to the VPP later
-        /** Only set when the possession proof FAILED: which certificate on the
-         *  card (if any) the signature actually verifies against, per-alias
-         *  key/cert details, and a cross-signing probe. Renewing the DNIe at
-         *  an update point replaces keys AND certificates, and a key/cert
-         *  mapping mismatch is the typical failure afterwards. */
+        val chainsToDnieRoot: Boolean,
+        val notExpired: Boolean,
+        val proofOfPossession: Boolean,
+        val tamperRejected: Boolean,
+        val authCertPem: String,
+        /** Only set when the possession proof failed: which card certificate the signature verifies against. */
         val diagnostic: String? = null,
     ) {
         val allPassed: Boolean
@@ -55,33 +51,18 @@ class DnieAuth(dnieRootInput: InputStream) {
         val chainLength: Int,
         val chainsToDnieRoot: Boolean,
         val notExpired: Boolean,
-        val notAfter: String,          // certificate expiry date, human-readable
+        val notAfter: String,
     )
 
-    /**
-     * @param tag NFC tag delivered by [android.nfc.NfcAdapter.ReaderCallback].
-     * @param can the 6-digit Card Access Number printed on the front of the DNIe.
-     *            It opens the PACE secure channel; the PIN is asked for separately
-     *            by the SDK's own dialog when the private key is used.
-     * @param onCardRead invoked as soon as the certificate has been read and
-     *            validated -- BEFORE any PIN interaction. This lets the UI show
-     *            holder, chain and expiry even if the user cancels the PIN
-     *            (useful to check expiry without knowing the PIN at all).
-     *
-     * Must be called off the main thread (card I/O + a blocking PIN dialog).
-     */
+    /** Card read plus possession proof; [onCardRead] fires before the PIN is asked. Blocking, call off the main thread. */
     fun authenticate(tag: Tag, can: String, onCardRead: ((CardInfo) -> Unit)? = null): Result {
         val provider = DnieProvider()
         Security.insertProviderAt(provider, 1)
         try {
             return doAuthenticate(provider, tag, can, onCardRead)
         } finally {
-            // CRITICAL: the provider sits at position 1 of the PROCESS-WIDE
-            // JCA list; leaving it installed makes later generic crypto --
-            // including Conscrypt's TLS handshakes -- resolve against a card
-            // that is no longer on the antenna, which surfaces as
-            // "Failure in SSL library ... RSA routines: internal error" in
-            // every subsequent TLS connection of the app.
+            // Left at position 1 of the process-wide JCA list, the provider would route later
+            // crypto, Conscrypt's TLS handshakes included, to a card no longer on the antenna.
             Security.removeProvider(provider.name)
         }
     }
@@ -105,8 +86,7 @@ class DnieAuth(dnieRootInput: InputStream) {
         val notExpired = runCatching { authCert.checkValidity() }.isSuccess
         val subject = authCert.subjectX500Principal.getName(X500Principal.RFC2253, OID_NAMES)
 
-        // Everything above needed only the CAN. Report it before touching the
-        // private key, which is the part that triggers the PIN dialog.
+        // Reported before the private key is touched, which is what triggers the PIN dialog.
         onCardRead?.invoke(
             CardInfo(
                 holderName = buildHolderName(subject),
@@ -121,17 +101,12 @@ class DnieAuth(dnieRootInput: InputStream) {
 
         val privateKey = keyStore.getKey(alias, null) as PrivateKey
 
-        // ── Proof of possession ──────────────────────────────────────────────
-        // A nonce we generate right now: the card cannot have a precomputed
-        // signature for it, so a valid signature proves the key is present.
+        // Fresh nonce: the card cannot hold a precomputed signature for it.
         val nonce = ByteArray(32).also { SecureRandom().nextBytes(it) }
         val signature = sign(privateKey, provider, nonce)
 
         val proofOfPossession = verify(authCert, nonce, signature)
-        // Negative control: flip one byte; this must NOT verify. Without it a
-        // broken verify() that always returned true would look like a success.
-        // NOTE: when proofOfPossession is already false this check passes
-        // trivially (nothing verifies), so it only means something on success.
+        // Negative control: a verify() that always returned true would otherwise look like success.
         val tampered = nonce.copyOf().also { it[0] = (it[0] + 1).toByte() }
         val tamperRejected = !verify(authCert, tampered, signature)
 
@@ -153,18 +128,8 @@ class DnieAuth(dnieRootInput: InputStream) {
         )
     }
 
-    /**
-     * Post-mortem of a failed possession proof. Answers, in order:
-     *  1. WHAT is on the card: every alias with its KeyUsage, key algorithm,
-     *     and issuance date (a renewal shows a recent notBefore).
-     *  2. WHICH certificate the signature actually verifies against, if any --
-     *     a match on a different alias means the SDK associated the selected
-     *     certificate with the WRONG private key (key/cert mapping swap).
-     * Everything here works on public material only. The card's other key is
-     * the qualified signature key, and under eIDAS whatever it signs is a
-     * qualified electronic signature of the holder, so no diagnostic may ever
-     * drive it, not even over a random nonce.
-     */
+    /** Post-mortem of a failed possession proof, on public material only: the card's other key
+     *  is the qualified signature key and must never be driven, not even over a random nonce. */
     private fun buildDiagnostic(
         keyStore: KeyStore, selectedAlias: String,
         nonce: ByteArray, signature: ByteArray,
@@ -184,9 +149,7 @@ class DnieAuth(dnieRootInput: InputStream) {
             appendLine("  [$a] $kuText")
             appendLine("      key=${cert.publicKey.algorithm}${bits?.let { "-$it" } ?: ""} " +
                     "issued=${cert.notBefore} expires=${cert.notAfter}")
-            // Which digest/padding does the returned signature actually match?
-            // A hit on SHA1 or PSS means the SDK signed with a different
-            // scheme than the SHA256/PKCS#1 we requested (applet mismatch).
+            // A hit on SHA1 or PSS means the SDK signed with a scheme other than the one requested.
             val matching = PROBE_ALGORITHMS.filter { verifyWith(it, cert, nonce, signature) }
             appendLine("      the signature verifies with: " +
                     (matching.takeIf { it.isNotEmpty() }?.joinToString() ?: "(none)"))
@@ -194,12 +157,7 @@ class DnieAuth(dnieRootInput: InputStream) {
         }
     }.trimEnd()
 
-    /**
-     * The DNIe carries two certificates. They are told apart by KeyUsage:
-     *   - authentication -> digitalSignature (bit 0)
-     *   - qualified signature -> nonRepudiation / contentCommitment (bit 1)
-     * We want the authentication one, so we require bit 0 set and bit 1 clear.
-     */
+    /** Authentication cert: KeyUsage digitalSignature (bit 0) set, nonRepudiation (bit 1) clear; bit 1 marks the qualified signature cert. */
     private fun findAuthenticationAlias(keyStore: KeyStore): String? =
         keyStore.aliases().toList().firstOrNull { alias ->
             val ku = (keyStore.getCertificate(alias) as? X509Certificate)?.keyUsage
@@ -212,8 +170,6 @@ class DnieAuth(dnieRootInput: InputStream) {
         val path = chain.filterNot { it.subjectX500Principal == it.issuerX500Principal }
         val certPath = CertificateFactory.getInstance("X.509").generateCertPath(path)
         val params = PKIXParameters(setOf(TrustAnchor(dnieRoot, null))).apply {
-            // TODO(TFG): revocation checking (OCSP at http://ocsp.dnie.es) — a
-            // revoked (lost/stolen) DNIe still passes today; documented gap.
             isRevocationEnabled = false
         }
         CertPathValidator.getInstance("PKIX").validate(certPath, params)
@@ -228,18 +184,8 @@ class DnieAuth(dnieRootInput: InputStream) {
             update(data)
         }.sign()
 
-    /**
-     * The decisive probe: applies the RAW RSA public-key operation of [cert]
-     * to the signature and inspects the recovered block. Distinguishes the two
-     * remaining failure modes when no standard algorithm verifies:
-     *
-     *  - the block has no PKCS#1 structure -> the signature was made by a
-     *    DIFFERENT key than this certificate's (SDK/applet key-reference
-     *    mismatch; only an SDK update can fix it);
-     *  - the block is valid PKCS#1 and even contains the nonce's hash -> the
-     *    key IS right and only the DigestInfo encoding is non-standard
-     *    (fixable here, by comparing digests manually).
-     */
+    /** Raw RSA public-key operation on the signature: no PKCS#1 block means another key signed;
+     *  the nonce's hash inside the block means only the DigestInfo encoding is non-standard. */
     private fun rawRsaProbe(
         cert: X509Certificate, nonce: ByteArray, signature: ByteArray,
     ): String = try {
@@ -287,10 +233,8 @@ class DnieAuth(dnieRootInput: InputStream) {
 
     private fun verify(cert: X509Certificate, data: ByteArray, sig: ByteArray): Boolean {
         val strict = try {
-            // Verification uses the PUBLIC key, so it must run on the phone, never on
-            // the card. DnieProvider was inserted at position 1, so a plain
-            // Signature.getInstance() would resolve to it and try to drive the card
-            // for a verify operation. Pick the first provider that is not the DNIe one.
+            // Public-key verification must run on the phone: with DnieProvider at position 1 a
+            // plain getInstance() would resolve to it and try to drive the card.
             val soft = Security.getProviders("Signature.$SIG_ALGORITHM")
                 ?.firstOrNull { it !is DnieProvider }
             val engine = if (soft != null) Signature.getInstance(SIG_ALGORITHM, soft)
@@ -304,12 +248,8 @@ class DnieAuth(dnieRootInput: InputStream) {
             false
         }
         if (strict) return true
-        // DNIe cards with RENEWED certificates emit a slightly non-standard
-        // DigestInfo that strict verifiers reject even though the key, the
-        // PKCS#1 padding and the SHA-256 of the data are all correct
-        // (established with the raw-RSA diagnostic probe). Fall back to a
-        // manual PKCS#1 v1.5 check that is strict about everything except the
-        // DigestInfo's ASN.1 prefix.
+        // Renewed DNIe certificates emit a non-standard DigestInfo that strict verifiers reject
+        // although key, padding and hash are right; fall back to a check lenient only there.
         return try {
             lenientPkcs1Sha256Verify(cert, data, sig)
         } catch (e: Exception) {
@@ -317,14 +257,7 @@ class DnieAuth(dnieRootInput: InputStream) {
         }
     }
 
-    /**
-     * Manual PKCS#1 v1.5 verification, lenient ONLY about the DigestInfo
-     * ASN.1 encoding: applies the raw RSA public-key operation and requires
-     * a well-formed type-1 block -- 0x00 0x01, at least eight 0xFF padding
-     * bytes, a 0x00 separator -- whose trailing 32 bytes equal SHA-256(data).
-     * A wrong key yields a garbage block; tampered data changes the hash;
-     * both fail. Only the ~19 DigestInfo prefix bytes go unparsed.
-     */
+    /** PKCS#1 v1.5 check lenient only about the DigestInfo prefix: a wrong key or tampered data still fail. */
     private fun lenientPkcs1Sha256Verify(
         cert: X509Certificate, data: ByteArray, sig: ByteArray,
     ): Boolean {
@@ -368,8 +301,7 @@ class DnieAuth(dnieRootInput: InputStream) {
             "SHA256withRSA/PSS",
         )
 
-        // X500Principal only knows the short names for a handful of attributes;
-        // these are the ones the DNIe uses that would otherwise print as raw OIDs.
+        // X500Principal would print these DNIe attributes as raw OIDs.
         val OID_NAMES = mapOf(
             "2.5.4.5" to "SERIALNUMBER",
             "2.5.4.4" to "SURNAME",

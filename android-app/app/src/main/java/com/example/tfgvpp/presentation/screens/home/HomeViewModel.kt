@@ -30,7 +30,6 @@ class HomeViewModel @Inject constructor(
         refresh()
     }
 
-    /** Re-reads the list from the VPP over mutual TLS. */
     fun refresh() {
         if (_uiState.value.isLoading) return
         _uiState.update { it.copy(isLoading = true, error = null) }

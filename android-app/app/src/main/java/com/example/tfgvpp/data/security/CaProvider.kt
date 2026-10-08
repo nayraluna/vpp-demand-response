@@ -17,11 +17,9 @@ class CaProvider @Inject constructor(
     private val bytes: ByteArray =
         context.resources.openRawResource(R.raw.ca).use { it.readBytes() }
 
-    /** The RA/CA certificate itself (chain verifications). */
     val certificate: X509Certificate =
         CertificateFactory.getInstance("X.509")
             .generateCertificate(bytes.inputStream()) as X509Certificate
 
-    /** A fresh stream over the CA bytes, for a client constructor. */
     fun newInputStream(): InputStream = ByteArrayInputStream(bytes)
 }

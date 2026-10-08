@@ -103,6 +103,6 @@ is **not** implemented, a documented gap.
   and Nimbus clients already do and the JVM flow test verifies.
 - The calendar keeps the protocol's 48 half-hour slots per day on the wire. The
   UI edits at 1-hour granularity, so each hour maps to two slots.
-- **Two gaps are marked in the code** with `TODO(TFG)` comments: revocation
-  checking for the DNIe (`data/security/DnieAuth.kt`) and a pseudonymous CN in
-  place of the raw DNI (`data/repository/UserRepositoryImpl.kt`).
+- **Two gaps remain**: the DNIe's revocation status is not checked
+  (`data/security/DnieAuth.kt`), and the certificate CN is the raw DNI rather
+  than a pseudonym assigned by the RA (`data/repository/UserRepositoryImpl.kt`).

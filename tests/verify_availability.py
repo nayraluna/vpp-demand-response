@@ -82,8 +82,6 @@ def bind_appliance(key, cert_pem: str, client) -> str:
 
 
 def weekday_calendar() -> dict:
-    """Curtailable on weekday afternoons (15:00-19:00), never at night or weekends -
-    the example from the Design chapter."""
     week = availability.empty_week()
     start, end = availability.slot_index(15), availability.slot_index(19)
     for day in ("mon", "tue", "wed", "thu", "fri"):
@@ -95,7 +93,6 @@ def weekday_calendar() -> dict:
 
 
 def sign_calendar(key, cert_pem: str, slots: dict, version: int) -> str:
-    """The owner-signed calendar JWS the mobile application produces."""
     cert = x509.load_pem_x509_certificate(cert_pem.encode())
     x5c = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode()
     key_pem = key.private_bytes(
@@ -127,7 +124,6 @@ def main():
             if body["declared_slots"] == expected and body["version"] == version \
             else die(f"expected {expected} slots at version {version}, got {body}")
 
-        # The appliance retrieves the signed calendar through its own poll.
         r = requests.post(f"{APP}/poll")
         if not r.ok:
             die(f"appliance poll -> {r.status_code} {r.text}")
@@ -207,8 +203,7 @@ def main():
             else die(f"expected 400 stale, got {r.status_code} {r.text}")
 
         print("G7: a rolled-back calendar is refused by the appliance itself")
-        # Simulate a misbehaving VPP: plant an old, fully permissive calendar
-        # (validly signed by the owner, version 1) in the row the poll relays.
+        # A misbehaving VPP: plant an older owner-signed calendar in the row the poll relays.
         permissive = {d: "1" * availability.SLOTS_PER_DAY for d in availability.DAYS}
         rollback = sign_calendar(ukey, ucert, permissive, 1)
         with sqlite3.connect(str(DB_FILE)) as c:
@@ -226,12 +221,8 @@ def main():
             else die(f"appliance lost its newer calendar: {st}")
 
         print("G8: a forged owner certificate outside the CA chain is refused")
-        # The strongest misbehaving-VPP move: it cannot steal the owner's key,
-        # so it mints a SELF-SIGNED certificate bearing the owner's exact
-        # subject and signs a permissive calendar with a NEWER version. The
-        # signature verifies against the forged certificate and the subject
-        # matches the recorded owner; only the chain check (signer certified
-        # by the CA delivered at pairing) stands between this and adoption.
+        # A self-signed certificate with the owner's exact subject and a newer version:
+        # only the chain check stands between this and adoption.
         owner_subject = x509.load_pem_x509_certificate(ucert.encode()).subject
         fkey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         now = datetime.datetime.now(datetime.timezone.utc)

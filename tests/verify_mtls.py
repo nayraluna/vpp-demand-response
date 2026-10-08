@@ -79,10 +79,8 @@ def main():
         else:
             die(f"expected authenticated session, got {r.status_code} {r.text}")
 
-        # Note on the exception type: with TLS 1.3 the server only rejects a
-        # missing/untrusted client certificate after its own handshake flight,
-        # so the client sees either an SSLError or the connection being closed
-        # (ConnectionError). What matters is that the request never succeeds.
+        # Under TLS 1.3 the server rejects the client certificate after its own flight,
+        # so the client sees either an SSLError or a closed connection.
         print("G2: a client WITHOUT a certificate is rejected at the handshake")
         try:
             requests.get(f"{MTLS}/session", verify=CA_FILE)
@@ -100,7 +98,7 @@ def main():
             ok(f"self-signed (foreign) client cert rejected ({type(e).__name__})")
 
         print("G4: an RA cert that was never enrolled is not authorized")
-        gkey, gcert = ra_cert(f"ghost-{secrets.token_hex(3)}")  # NOT enrolled
+        gkey, gcert = ra_cert(f"ghost-{secrets.token_hex(3)}")
         gcf, gkf = write_pair("ghost", gkey, gcert)
         r = requests.get(f"{MTLS}/session", cert=(gcf, gkf), verify=CA_FILE)
         ok("valid platform cert but no account -> 403") if r.status_code == 403 \

@@ -37,8 +37,6 @@ def die(msg):
 
 
 def enrolled_user(name: str):
-    """Get a certificate from the RA and enroll it at the VPP; return (cert, key)
-    file paths usable as a mutual-TLS client identity."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     csr = (x509.CertificateSigningRequestBuilder()
            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)]))
@@ -60,7 +58,6 @@ def enrolled_user(name: str):
 
 
 def pair_appliance(key, cert_pem: str) -> dict:
-    """Run local pairing as this user and return the appliance's response."""
     requests.post(f"{APP}/factory-reset")
     cert = x509.load_pem_x509_certificate(cert_pem.encode())
     x5c = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode()
@@ -79,8 +76,7 @@ def pair_appliance(key, cert_pem: str) -> dict:
 
 
 def forged_proof(owner_subject: str, power: int) -> str:
-    """A proof correctly signed by the appliance's certified key but declaring a
-    different nominal power (simulates a compromised appliance)."""
+    """Correctly signed by the appliance key but over-declaring power: a compromised appliance."""
     key = serialization.load_pem_private_key((CERTS / "VEN.key").read_bytes(), None)
     cert = x509.load_pem_x509_certificate((CERTS / "VEN.crt").read_bytes())
     x5c = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode()

@@ -51,7 +51,6 @@ def main():
     token = crypto_service.sign_jws({"message": "hello world"})
     print(f"JWS produced by the VPP:\n  {token[:56]}...{token[-16:]}\n")
 
-    # --- header ---
     header = jwt.get_unverified_header(token)
     ok(f"header alg = {header['alg']}") if header.get("alg") == "RS256" \
         else die(f"unexpected alg: {header.get('alg')}")
@@ -59,7 +58,6 @@ def main():
         else die("no x5c header")
     ok(f"header typ = {header.get('typ')}")
 
-    # --- x5c chains to the CA ---
     cert = x509.load_der_x509_certificate(base64.b64decode(header["x5c"][0]))
     if chains_to_ca(cert, ca):
         ok(f"x5c certificate chains to the CA ({cert.subject.rfc4514_string()})")
@@ -71,14 +69,12 @@ def main():
         serialization.PublicFormat.SubjectPublicKeyInfo,
     )
 
-    # --- valid verification (algorithms pinned to RS256) ---
     payload = jwt.decode(token, pub_pem, algorithms=["RS256"])
     if payload.get("message") == "hello world":
         ok(f"signature verifies, payload recovered: {payload}")
     else:
         die(f"payload mismatch: {payload}")
 
-    # --- tampered token must be rejected ---
     h, p, s = token.split(".")
     s_bad = ("A" if s[0] != "A" else "B") + s[1:]
     try:
@@ -87,7 +83,6 @@ def main():
     except Exception:
         ok("tampered token rejected")
 
-    # --- alg:none forgery must be rejected ---
     forged = b64url({"alg": "none", "typ": "JWT"}) + "." \
         + b64url({"message": "hello world"}) + "."
     try:

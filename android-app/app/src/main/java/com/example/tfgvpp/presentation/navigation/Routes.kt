@@ -19,7 +19,6 @@ sealed class Route(val route: String) {
     }
 
     companion object {
-        /** Name of the VEN-subject argument shared by the appliance screens. */
         const val ARG_VEN = "ven"
     }
 }
