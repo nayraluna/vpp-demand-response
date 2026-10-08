@@ -9,7 +9,7 @@ from . import crypto_service
 
 
 class InvalidOwnerProof(Exception):
-    """Malformed proof, bad signature, or appliance not certified by the RA."""
+    """Malformed proof, bad signature, or appliance not certified by the CA."""
 
 
 class OwnershipMismatch(Exception):
@@ -38,9 +38,9 @@ def verify(jws_token: str, authenticated_user: str) -> dict:
         raise InvalidOwnerProof("owner proof carries no appliance certificate (x5c)")
     ven_cert = x509.load_der_x509_certificate(base64.b64decode(x5c[0]))
 
-    # (1) the appliance certificate must have been issued by the RA
-    if not crypto_service.issued_by_ra(ven_cert):
-        raise InvalidOwnerProof("appliance certificate not issued by the RA")
+    # (1) the appliance certificate must have been issued by the CA
+    if not crypto_service.issued_by_ca(ven_cert):
+        raise InvalidOwnerProof("appliance certificate not issued by the CA")
     if not crypto_service.within_validity(ven_cert):
         raise InvalidOwnerProof("appliance certificate expired or not yet valid")
 

@@ -18,7 +18,7 @@ CERTS = ROOT / "certs"
 CA_FILE = str(CERTS / "CA.crt")
 DB_FILE = ROOT / "vpp-server" / "vpp.db"
 VPP, MTLS = "https://127.0.0.1:8080", "https://127.0.0.1:8443"
-MAN, APP = "https://127.0.0.1:8081", "http://127.0.0.1:8082"
+CA, APP = "https://127.0.0.1:8081", "http://127.0.0.1:8082"
 
 passed = 0
 tmp = Path(tempfile.mkdtemp(prefix="ownerproof_"))
@@ -43,7 +43,7 @@ def enrolled_user(name: str):
     csr = (x509.CertificateSigningRequestBuilder()
            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)]))
            .sign(key, hashes.SHA256()))
-    r = requests.post(f"{MAN}/ra/issue",
+    r = requests.post(f"{CA}/ra/issue",
                       json={"csr": csr.public_bytes(serialization.Encoding.PEM).decode()},
                       verify=CA_FILE)
     if not r.ok:
@@ -70,7 +70,6 @@ def pair_appliance(key, cert_pem: str) -> dict:
     token = jwt.encode({
         "vpp_url": VPP, "vpp_mtls_url": MTLS,
         "cert_vpp": (CERTS / "vpp.crt").read_text(),
-        "cert_ra": (CERTS / "CA.crt").read_text(),
     }, key_pem, algorithm="RS256",
         headers={"x5c": [x5c], "typ": "application/pairing+json"})
     r = requests.post(f"{APP}/pair", json={"jws": token})

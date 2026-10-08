@@ -119,8 +119,7 @@ def onboard(key, cert_pem: str, client) -> str:
     requests.post(f"{APP}/factory-reset")
     bundle = sign_as(key, cert_pem, {
         "vpp_url": VPP, "vpp_mtls_url": MTLS,
-        "cert_vpp": (CERTS / "vpp.crt").read_text(),
-        "cert_ra": (CERTS / "CA.crt").read_text()}, "application/pairing+json")
+        "cert_vpp": (CERTS / "vpp.crt").read_text()}, "application/pairing+json")
     proof = requests.post(f"{APP}/pair", json={"jws": bundle}).json()["owner_proof"]
     ven = requests.post(f"{MTLS}/appliances/owner-proof", json={"owner_proof": proof},
                         cert=client, verify=CA_FILE).json()["ven"]

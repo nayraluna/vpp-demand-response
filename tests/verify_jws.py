@@ -59,12 +59,12 @@ def main():
         else die("no x5c header")
     ok(f"header typ = {header.get('typ')}")
 
-    # --- x5c chains to the RA ---
+    # --- x5c chains to the CA ---
     cert = x509.load_der_x509_certificate(base64.b64decode(header["x5c"][0]))
     if chains_to_ca(cert, ca):
-        ok(f"x5c certificate chains to RA ({cert.subject.rfc4514_string()})")
+        ok(f"x5c certificate chains to the CA ({cert.subject.rfc4514_string()})")
     else:
-        die("x5c certificate does not chain to RA")
+        die("x5c certificate does not chain to the CA")
 
     pub_pem = cert.public_key().public_bytes(
         serialization.Encoding.PEM,

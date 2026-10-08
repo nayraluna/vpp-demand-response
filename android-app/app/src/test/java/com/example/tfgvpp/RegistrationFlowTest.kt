@@ -304,12 +304,14 @@ class RegistrationFlowTest {
 
     private fun slotLabel(slot: Int) = "%02d:%02d".format(slot / 2, (slot % 2) * 30)
 
-    /** RA-issued credential with OU=role=operator, the DR operator's identity. */
+    /** RA-issued credential with OU=role=operator, the DR operator's identity.
+     *  The name is fresh each run: the CA issues one live certificate per subject. */
     private fun operatorCredential(ca: X509Certificate): RegistrationClient.UserCredential {
         val keyPair = KeyPairGenerator.getInstance("RSA")
             .apply { initialize(2048) }.generateKeyPair()
+        val tag = ByteArray(3).let { SecureRandom().nextBytes(it); it.joinToString("") { b -> "%02x".format(b) } }
         val subject = X500NameBuilder(BCStyle.INSTANCE)
-            .addRDN(BCStyle.CN, "test-operator")
+            .addRDN(BCStyle.CN, "test-operator-$tag")
             .addRDN(BCStyle.OU, "role=operator")
             .build()
         val csr = JcaPKCS10CertificationRequestBuilder(subject, keyPair.public)

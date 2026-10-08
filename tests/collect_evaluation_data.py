@@ -24,7 +24,7 @@ CERTS = ROOT / "certs"
 CA_FILE = str(CERTS / "CA.crt")
 DB_FILE = ROOT / "vpp-server" / "vpp.db"
 VPP, MTLS = "https://127.0.0.1:8080", "https://127.0.0.1:8443"
-MAN, APP = "https://127.0.0.1:8081", "http://127.0.0.1:8082"
+CA, APP = "https://127.0.0.1:8081", "http://127.0.0.1:8082"
 PY = sys.executable
 
 sys.path.insert(0, str(ROOT / "vpp-server"))
@@ -107,7 +107,7 @@ def ra_identity(name):
            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)]))
            .sign(key, hashes.SHA256()))
     r = requests.post(
-        f"{MAN}/ra/issue",
+        f"{CA}/ra/issue",
         json={"csr": csr.public_bytes(serialization.Encoding.PEM).decode()},
         verify=CA_FILE)
     r.raise_for_status()
@@ -163,7 +163,7 @@ def main():
                    NameOID.COMMON_NAME, f"eval-perf-{run}-{i:02d}")]))
                .sign(throwaway, hashes.SHA256()))
         (r, ms) = timed(lambda: requests.post(
-            f"{MAN}/ra/issue",
+            f"{CA}/ra/issue",
             json={"csr": csr.public_bytes(serialization.Encoding.PEM).decode()},
             verify=CA_FILE))
         r.raise_for_status()
@@ -179,8 +179,7 @@ def main():
 
     bundle = sign_as(key, cert_pem, {
         "vpp_url": VPP, "vpp_mtls_url": MTLS,
-        "cert_vpp": (CERTS / "vpp.crt").read_text(),
-        "cert_ra": (CERTS / "CA.crt").read_text()}, "application/pairing+json")
+        "cert_vpp": (CERTS / "vpp.crt").read_text()}, "application/pairing+json")
 
     print(f"== phase 1: onboarding, {SAMPLES} samples ==")
     pair_ms, proof_ms = [], []

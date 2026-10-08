@@ -140,7 +140,7 @@ class RegistrationClient(caInput: InputStream) {
     }
 
     companion object {
-        /** OkHttp client that trusts ONLY the RA/CA (the only trust anchor everywhere). */
+        /** OkHttp client that trusts ONLY the platform CA root (the only trust anchor everywhere). */
         fun buildServerAuthClient(caCertificate: X509Certificate): OkHttpClient {
             val tm = trustManagerFor(caCertificate)
             val ssl = SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), null) }

@@ -72,20 +72,20 @@ def pair(jws_token: str) -> dict:
         raise InvalidBundle(f"owner signature invalid: {e}")
 
     # 3. The owner and the VPP must both be certified by the root this device
-    #    left the factory with. The bundle may still carry a `cert_ra` field,
-    #    older apps send it, but it is ignored: a trust anchor received over the
-    #    channel it is meant to protect would let anyone on the LAN enrol an
-    #    unpaired appliance into a VPP of their own, with a root of their own.
-    cert_ra = hsm.trust_anchor()
+    #    left the factory with. A `cert_ra` field in the bundle, if any, is
+    #    ignored: a trust anchor received over the channel it is meant to
+    #    protect would let anyone on the LAN enrol an unpaired appliance into a
+    #    VPP of their own, with a root of their own.
+    root = hsm.trust_anchor()
     try:
         cert_vpp = x509.load_pem_x509_certificate(payload["cert_vpp"].encode())
     except Exception as e:
         raise InvalidBundle(f"missing/invalid VPP certificate in bundle: {e}")
-    if not _issued_by(owner, cert_ra):
+    if not _issued_by(owner, root):
         raise InvalidBundle("owner certificate not issued by the platform CA")
     if not _within_validity(owner):
         raise InvalidBundle("owner certificate expired or not yet valid")
-    if not _issued_by(cert_vpp, cert_ra):
+    if not _issued_by(cert_vpp, root):
         raise InvalidBundle("VPP certificate not issued by the platform CA")
     if not _within_validity(cert_vpp):
         raise InvalidBundle("VPP certificate expired or not yet valid")
@@ -105,7 +105,6 @@ def pair(jws_token: str) -> dict:
         "owner": owner_subject,
         "owner_serial": format(owner.serial_number, "x"),
         "paired_at": now,
-        "ra_cert_file": str(hsm.CA_FILE),
         "vpp_cert_file": str(vpp_file),
     })
     device_config.save(cfg)

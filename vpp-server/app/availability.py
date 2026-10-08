@@ -55,7 +55,7 @@ def verify_signed(jws_token: str, expected_owner: str) -> dict:
             base64.b64decode(header["x5c"][0]))
     except Exception as e:
         raise InvalidAvailability(f"calendar is not an owner-signed JWS: {e}")
-    if not crypto_service.issued_by_ra(owner_cert):
+    if not crypto_service.issued_by_ca(owner_cert):
         raise InvalidAvailability("calendar signer not certified by the CA")
     if not crypto_service.within_validity(owner_cert):
         raise InvalidAvailability("calendar signer certificate expired or not yet valid")

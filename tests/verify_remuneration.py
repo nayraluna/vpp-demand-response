@@ -20,7 +20,7 @@ CERTS = ROOT / "certs"
 CA_FILE = str(CERTS / "CA.crt")
 DB_FILE = ROOT / "vpp-server" / "vpp.db"
 VPP, MTLS = "https://127.0.0.1:8080", "https://127.0.0.1:8443"
-MAN, APP = "https://127.0.0.1:8081", "http://127.0.0.1:8082"
+CA, APP = "https://127.0.0.1:8081", "http://127.0.0.1:8082"
 VEN_CLIENT = (str(CERTS / "VEN.crt"), str(CERTS / "VEN.key"))
 
 sys.path.insert(0, str(ROOT / "vpp-server"))
@@ -61,7 +61,7 @@ def ra_identity(name: str, org_unit: str | None = None):
         attrs.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, org_unit))
     csr = (x509.CertificateSigningRequestBuilder()
            .subject_name(x509.Name(attrs)).sign(key, hashes.SHA256()))
-    r = requests.post(f"{MAN}/ra/issue",
+    r = requests.post(f"{CA}/ra/issue",
                       json={"csr": csr.public_bytes(serialization.Encoding.PEM).decode()},
                       verify=CA_FILE)
     if not r.ok:
@@ -103,8 +103,7 @@ def onboard(key, cert_pem, client, calendar) -> str:
     requests.post(f"{APP}/factory-reset")
     bundle = sign_as(key, cert_pem, {
         "vpp_url": VPP, "vpp_mtls_url": MTLS,
-        "cert_vpp": (CERTS / "vpp.crt").read_text(),
-        "cert_ra": (CERTS / "CA.crt").read_text()}, "application/pairing+json")
+        "cert_vpp": (CERTS / "vpp.crt").read_text()}, "application/pairing+json")
     proof = requests.post(f"{APP}/pair", json={"jws": bundle}).json()["owner_proof"]
     ven = requests.post(f"{MTLS}/appliances/owner-proof", json={"owner_proof": proof},
                         cert=client, verify=CA_FILE).json()["ven"]

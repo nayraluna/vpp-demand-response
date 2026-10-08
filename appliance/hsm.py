@@ -83,7 +83,7 @@ def sign_jws(payload: dict, typ: str = "application/owner-proof+json") -> str:
     """Sign `payload` inside the HSM as a compact JWS (the PAS4 container).
 
     The VEN certificate travels in the x5c header so the VPP can verify the
-    signature and chain it to the RA without knowing the appliance in advance.
+    signature and chain it to the CA without knowing the appliance in advance.
     """
     if not isinstance(_private_key, rsa.RSAPrivateKey):
         raise RuntimeError("sign_jws currently supports RS256 (RSA) only")

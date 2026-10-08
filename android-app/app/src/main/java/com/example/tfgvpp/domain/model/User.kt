@@ -4,7 +4,7 @@ enum class CertificateStatus {
     /** The certificate chains to the platform RA/CA. */
     VALID,
 
-    /** The certificate does not chain to the RA (e.g. the CA was regenerated). */
+    /** The certificate does not chain to the CA (e.g. the root was regenerated). */
     INVALID,
 }
 

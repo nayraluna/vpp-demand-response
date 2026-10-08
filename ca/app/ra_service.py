@@ -75,7 +75,9 @@ PROFILES = {
     "tls-server": {"key_encipherment": True,
                    "eku": [x509.ExtendedKeyUsageOID.SERVER_AUTH]},
     # The VPP: one certificate per entity, as in the reference protocol. It
-    # serves TLS on two listeners and signs DR events, so it is both.
+    # serves TLS on two listeners, and the same key is provisioned for signing
+    # DR events (crypto_service.sign_jws), although no endpoint exercises that
+    # yet: activations rest on the mutual-TLS channel and a random identifier.
     "tls-server+signing": {"key_encipherment": True,
                            "eku": [x509.ExtendedKeyUsageOID.SERVER_AUTH]},
 }

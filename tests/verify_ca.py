@@ -11,7 +11,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
 CA_FILE = str(ROOT / "certs" / "CA.crt")
-MAN = "https://127.0.0.1:8081"
+CA = "https://127.0.0.1:8081"
 
 passed = 0
 
@@ -65,7 +65,7 @@ def main():
     print(f"Entity generated a local key pair and a CSR (CN={cn})\n")
 
     print("G1: RA issues a certificate from the CSR")
-    r = requests.post(f"{MAN}/ra/issue", json={"csr": csr_pem}, verify=CA_FILE)
+    r = requests.post(f"{CA}/ra/issue", json={"csr": csr_pem}, verify=CA_FILE)
     if not r.ok:
         die(f"/ra/issue -> {r.status_code} {r.text}")
     body = r.json()
@@ -73,9 +73,9 @@ def main():
     cert = x509.load_pem_x509_certificate(body["certificate"].encode())
 
     if chains_to_ca(cert, ca):
-        ok("issued certificate chains to the RA")
+        ok("issued certificate chains to the CA")
     else:
-        die("issued certificate does NOT chain to the RA")
+        die("issued certificate does NOT chain to the CA")
 
     if spki(cert.public_key()) == spki(key.public_key()):
         ok("issued certificate certifies OUR public key (RA never saw the private key)")
@@ -101,10 +101,10 @@ def main():
         die("signature did not verify under the issued certificate")
 
     print("G4: RA rejects abuse")
-    r = requests.post(f"{MAN}/ra/issue", json={"csr": csr_pem}, verify=CA_FILE)
+    r = requests.post(f"{CA}/ra/issue", json={"csr": csr_pem}, verify=CA_FILE)
     ok("re-enrollment of the same key rejected (409)") if r.status_code == 409 \
         else die(f"expected 409 on re-enroll, got {r.status_code}")
-    r = requests.post(f"{MAN}/ra/issue", json={"csr": "-----not a csr-----"}, verify=CA_FILE)
+    r = requests.post(f"{CA}/ra/issue", json={"csr": "-----not a csr-----"}, verify=CA_FILE)
     ok("malformed CSR rejected (400)") if r.status_code == 400 \
         else die(f"expected 400 on bad CSR, got {r.status_code}")
     # A new key asking for a name that already has a live certificate. The
@@ -112,7 +112,7 @@ def main():
     intruder = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     same_name = (x509.CertificateSigningRequestBuilder().subject_name(subject)
                  .sign(intruder, hashes.SHA256()))
-    r = requests.post(f"{MAN}/ra/issue",
+    r = requests.post(f"{CA}/ra/issue",
                       json={"csr": same_name.public_bytes(serialization.Encoding.PEM).decode()},
                       verify=CA_FILE)
     ok(f"a second live certificate for the same subject refused (409): {r.json().get('detail', '')[:60]}") \

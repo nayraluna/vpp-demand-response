@@ -26,9 +26,9 @@ def verify(jws_token: str, submitter_subject: str) -> dict:
         raise InvalidEvidence("evidence carries no appliance certificate (x5c)")
     ven_cert = x509.load_der_x509_certificate(base64.b64decode(x5c[0]))
 
-    # (1) the signing appliance must be certified by the RA
-    if not crypto_service.issued_by_ra(ven_cert):
-        raise InvalidEvidence("appliance certificate not issued by the RA")
+    # (1) the signing appliance must be certified by the CA
+    if not crypto_service.issued_by_ca(ven_cert):
+        raise InvalidEvidence("appliance certificate not issued by the CA")
     if not crypto_service.within_validity(ven_cert):
         raise InvalidEvidence("appliance certificate expired or not yet valid")
 

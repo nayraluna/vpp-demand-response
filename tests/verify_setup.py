@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CERTS = ROOT / "certs"
 CA_FILE = str(CERTS / "CA.crt")
 VPP = "https://127.0.0.1:8080"
-MAN = "https://127.0.0.1:8081"
+CA = "https://127.0.0.1:8081"
 
 sys.path.insert(0, str(ROOT / "appliance"))
 import hsm  # noqa: E402
@@ -61,9 +61,9 @@ def main():
     for name in ["vpp", "server", "VEN"]:
         cert = x509.load_pem_x509_certificate((CERTS / f"{name}.crt").read_bytes())
         if chains_to_ca(cert, ca):
-            ok(f"{name}.crt issued by the RA ({cert.subject.rfc4514_string()})")
+            ok(f"{name}.crt issued by the CA ({cert.subject.rfc4514_string()})")
         else:
-            die(f"{name}.crt does NOT chain to the RA")
+            die(f"{name}.crt does NOT chain to the CA")
 
     print("G2: VPP over TLS")
     r = requests.get(f"{VPP}/ping", verify=CA_FILE)
@@ -78,9 +78,9 @@ def main():
     vpp_crypto.initialize()
     vpp_cert = x509.load_pem_x509_certificate(vpp_crypto.certificate_pem().encode())
     if chains_to_ca(vpp_cert, ca):
-        ok(f"VPP signing certificate chains to RA ({vpp_cert.subject.rfc4514_string()})")
+        ok(f"VPP signing certificate chains to the CA ({vpp_cert.subject.rfc4514_string()})")
     else:
-        die("VPP signing certificate not issued by our RA")
+        die("VPP signing certificate not issued by our CA")
     sig = bytes.fromhex(vpp_crypto.sign("hello world"))
     try:
         vpp_cert.public_key().verify(sig, b"hello world", padding.PKCS1v15(), hashes.SHA256())
@@ -94,9 +94,9 @@ def main():
         ok("tampered message rejected")
 
     print("G3: CA over TLS")
-    r = requests.get(f"{MAN}/ping", verify=CA_FILE)
+    r = requests.get(f"{CA}/ping", verify=CA_FILE)
     ok(f"/ping -> {r.json()}") if r.ok else die(r.text)
-    r = requests.get(f"{MAN}/ra/certificate", verify=CA_FILE)
+    r = requests.get(f"{CA}/ra/certificate", verify=CA_FILE)
     served = x509.load_pem_x509_certificate(r.json()["certificate"].encode())
     if served.fingerprint(hashes.SHA256()) == ca.fingerprint(hashes.SHA256()):
         ok("RA distributes the correct trust anchor (CA.crt)")
@@ -108,9 +108,9 @@ def main():
     ok(f"software HSM loaded VEN identity ({hsm.subject()})")
     ven_cert = x509.load_pem_x509_certificate(hsm.certificate_pem().encode())
     if chains_to_ca(ven_cert, ca):
-        ok("VEN certificate chains to RA")
+        ok("VEN certificate chains to the CA")
     else:
-        die("VEN certificate not issued by our RA")
+        die("VEN certificate not issued by our CA")
     msg = "ven-0001|hello world"
     sig = bytes.fromhex(hsm.sign(msg))
     try:

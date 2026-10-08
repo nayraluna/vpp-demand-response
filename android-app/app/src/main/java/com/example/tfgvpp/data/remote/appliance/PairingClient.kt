@@ -20,20 +20,18 @@ import javax.security.auth.x500.X500Principal
 class PairingClient(caInput: InputStream, private val registration: RegistrationClient.Registration) {
 
     private val caCertificate: X509Certificate
-    private val caPem: String
     private val jsonType = "application/json".toMediaType()
 
     /** Plain client for the appliance's local pairing service (HTTP, home network). */
     private val local = OkHttpClient()
 
-    /** Mutual-TLS client for the VPP: presents the user's RA-issued certificate. */
+    /** Mutual-TLS client for the VPP: presents the user's certificate. */
     private val mtls: OkHttpClient
 
     init {
         val bytes = caInput.use { it.readBytes() }
         caCertificate = CertificateFactory.getInstance("X.509")
             .generateCertificate(bytes.inputStream()) as X509Certificate
-        caPem = RegistrationClient.toPem("CERTIFICATE", caCertificate.encoded)
         mtls = RegistrationClient.buildMutualTlsClient(registration.credential, caCertificate)
     }
 
@@ -74,7 +72,6 @@ class PairingClient(caInput: InputStream, private val registration: Registration
             "vpp_url" to vppUrlForAppliance,
             "vpp_mtls_url" to vppMtlsUrlForAppliance,
             "cert_vpp" to registration.vppCertificatePem,
-            "cert_ra" to caPem,
         )
         val bundle = RegistrationClient.signedJws(registration.credential, payload)
 

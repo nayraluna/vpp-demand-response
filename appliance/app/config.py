@@ -13,7 +13,6 @@ FACTORY_DEFAULTS = {
     "owner": None,       # subject of the user who paired the appliance
     "owner_serial": None,   # serial of that user's certificate, checked against the CRL
     "paired_at": None,
-    "ra_cert_file": None,   # trust anchor used when calling the VPP
     "vpp_cert_file": None,
     # Operational state
     "registration": None,       # VEN registration with the VTN (ids + poll freq)

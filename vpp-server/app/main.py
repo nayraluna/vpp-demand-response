@@ -12,7 +12,7 @@ from . import crypto_service, db, revocation
 async def lifespan(app: FastAPI):
     crypto_service.initialize()
     db.initialize()
-    print(f"[vpp] signing identity loaded: {crypto_service.subject()}")
+    print(f"[vpp] identity loaded: {crypto_service.subject()}")
     yield
 
 
@@ -33,7 +33,7 @@ def enroll(req: EnrollRequest) -> dict:
     """Step 8a - App->VPP: create a user account.
 
     First contact is over normal TLS; the user presents the certificate the RA
-    issued for them. The VPP accepts it only if the RA signed it, stores the
+    issued for them. The VPP accepts it only if the CA signed it, stores the
     account, and returns Cert_VPP. From here on the user authenticates over
     mutual TLS with this same certificate.
     """
@@ -41,8 +41,8 @@ def enroll(req: EnrollRequest) -> dict:
         cert = x509.load_pem_x509_certificate(req.certificate.encode())
     except Exception:
         raise HTTPException(status_code=400, detail="invalid certificate PEM")
-    if not crypto_service.issued_by_ra(cert):
-        raise HTTPException(status_code=403, detail="certificate not issued by the RA")
+    if not crypto_service.issued_by_ca(cert):
+        raise HTTPException(status_code=403, detail="certificate not issued by the CA")
     if not crypto_service.within_validity(cert):
         raise HTTPException(status_code=403, detail="certificate expired or not yet valid")
     try:

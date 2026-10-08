@@ -35,16 +35,16 @@ def _adopt_crl(jws_token: str, cfg: dict) -> dict:
     """Verify and adopt the CA's revocation list relayed by the VTN.
 
     Same shape as the calendar: the VPP only relays it, the appliance trusts
-    the CA's signature, checked against the root recorded at pairing, and
-    accepts only a list numbered at or above the one it holds. A VPP that
+    the CA's signature, checked against its factory root, and accepts only a
+    list numbered at or above the one it holds. A VPP that
     serves an older list to hide a revocation is refused by the device itself.
     The caller persists cfg.
     """
     try:
-        ra_cert = x509.load_pem_x509_certificate(Path(cfg["ra_cert_file"]).read_bytes())
+        root = hsm.trust_anchor()
     except Exception as e:
-        return {"status": "refused", "reason": f"trust anchor from pairing unavailable: {e}"}
-    anchor = ra_cert.public_key().public_bytes(
+        return {"status": "refused", "reason": f"factory root unavailable: {e}"}
+    anchor = root.public_key().public_bytes(
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
     try:
         payload = jwt.decode(jws_token, anchor, algorithms=["RS256"])
@@ -94,17 +94,15 @@ def _adopt_calendar(jws_token: str, cfg: dict) -> dict:
         return {"status": "refused",
                 "reason": f"unsigned or malformed calendar: {e}"}
 
-    # The signer's certificate must chain to the CA root recorded at pairing.
-    # Matching the owner's NAME is not enough: without this check anyone -- the
-    # VPP included -- could mint a self-signed certificate bearing the owner's
-    # subject and have a forged or rolled-back calendar accepted.
+    # The signer's certificate must chain to the factory root. Matching the
+    # owner's NAME is not enough: without this check anyone, the VPP included,
+    # could mint a self-signed certificate bearing the owner's subject and have
+    # a forged or rolled-back calendar accepted.
     try:
-        ra_cert = x509.load_pem_x509_certificate(
-            Path(cfg["ra_cert_file"]).read_bytes())
+        root = hsm.trust_anchor()
     except Exception as e:
-        return {"status": "refused",
-                "reason": f"trust anchor from pairing unavailable: {e}"}
-    if not _issued_by(owner, ra_cert):
+        return {"status": "refused", "reason": f"factory root unavailable: {e}"}
+    if not _issued_by(owner, root):
         return {"status": "refused",
                 "reason": "calendar signer not certified by the CA"}
     if not _within_validity(owner):
@@ -233,7 +231,7 @@ def _ensure_registered(cfg: dict) -> None:
     cn = next((p.split("=", 1)[1] for p in hsm.subject().split(",")
                if p.strip().startswith("CN=")), hsm.subject())
     response = vtn_client.register(
-        cfg["vpp_mtls_url"], cfg["ra_cert_file"], *_ven_identity(),
+        cfg["vpp_mtls_url"], str(hsm.CA_FILE), *_ven_identity(),
         ven_name=cn,
         profile={"P": hsm.nominal_power(), "max": cfg["max"], "rec": cfg["rec"]},
     )
@@ -270,7 +268,7 @@ def _poll_and_process() -> dict:
     _ensure_registered(cfg)
 
     body = vtn_client.poll(
-        cfg["vpp_mtls_url"], cfg["ra_cert_file"], *_ven_identity(),
+        cfg["vpp_mtls_url"], str(hsm.CA_FILE), *_ven_identity(),
     )
 
     # The revocation list comes first: the calendar adopted right after is
@@ -370,7 +368,7 @@ def _submit_evidence() -> dict:
         }, typ="application/dr-evidence+json")
 
         result = vtn_client.submit_evidence(
-            cfg["vpp_mtls_url"], cfg["ra_cert_file"], *_ven_identity(), proof)
+            cfg["vpp_mtls_url"], str(hsm.CA_FILE), *_ven_identity(), proof)
 
         if result["status_code"] == 200:
             cfg.setdefault("submitted", []).append(record["activation_id"])

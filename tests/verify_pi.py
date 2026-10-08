@@ -148,7 +148,6 @@ def main():
     bundle = user_jws(ukey, ucert, {
         "vpp_url": VPP_FOR_PI, "vpp_mtls_url": MTLS_FOR_PI,
         "cert_vpp": (CERTS / "vpp.crt").read_text(),
-        "cert_ra": (CERTS / "CA.crt").read_text(),
     })
     r = requests.post(f"{PI}/pair", json={"jws": bundle}, timeout=15)
     if not r.ok:

@@ -27,7 +27,7 @@ def initialize() -> None:
         raise RuntimeError(f"VPP not provisioned: {e.filename} missing, run provision.py")
 
 
-def issued_by_ra(cert: x509.Certificate) -> bool:
+def issued_by_ca(cert: x509.Certificate) -> bool:
     """True if `cert` was signed by the CA (i.e. it is a platform identity)."""
     try:
         _ca_certificate.public_key().verify(

@@ -14,7 +14,7 @@ from cryptography.x509.oid import NameOID
 ROOT = Path(__file__).resolve().parent.parent
 CERTS = ROOT / "certs"
 CA_FILE = str(CERTS / "CA.crt")
-MAN = "https://127.0.0.1:8081"
+CA = "https://127.0.0.1:8081"
 APP = "http://127.0.0.1:8082"  # local pairing channel
 
 passed = 0
@@ -36,7 +36,7 @@ def ra_cert(cn: str):
     csr = (x509.CertificateSigningRequestBuilder()
            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)]))
            .sign(key, hashes.SHA256()))
-    r = requests.post(f"{MAN}/ra/issue",
+    r = requests.post(f"{CA}/ra/issue",
                       json={"csr": csr.public_bytes(serialization.Encoding.PEM).decode()},
                       verify=CA_FILE)
     if not r.ok:
@@ -119,7 +119,6 @@ def bundle() -> dict:
         "vpp_url": "https://127.0.0.1:8080",
         "vpp_mtls_url": "https://127.0.0.1:8443",
         "cert_vpp": (CERTS / "vpp.crt").read_text(),
-        "cert_ra": (CERTS / "CA.crt").read_text(),
     }
 
 
@@ -141,13 +140,13 @@ def main():
 
     skey, scert = self_signed("rogue")
     r = requests.post(f"{APP}/pair", json={"jws": make_jws(skey, scert, bundle())})
-    ok("owner not certified by the RA rejected (400)") if r.status_code == 400 \
+    ok("owner not certified by the CA rejected (400)") if r.status_code == 400 \
         else die(f"expected 400, got {r.status_code}")
 
     # The LAN attack: a bundle that is consistent under a root the attacker
-    # made, carrying that root as cert_ra. With the anchor delivered inside
-    # the bundle this used to pass every check. The device now trusts only the
-    # root it was provisioned with, so the whole fake platform is refused.
+    # made, offering that root as cert_ra. When the anchor was taken from the
+    # bundle this passed every check. The device trusts only the root it was
+    # provisioned with and ignores the field, so the fake platform is refused.
     froot, fkey, fuser, fvpp = fake_platform()
     fake = {**bundle(), "cert_ra": froot, "cert_vpp": fvpp}
     r = requests.post(f"{APP}/pair", json={"jws": make_jws(fkey, fuser, fake)})

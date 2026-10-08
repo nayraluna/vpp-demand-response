@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CERTS = ROOT / "certs"
 CA_FILE = str(CERTS / "CA.crt")
 VPP, MTLS = "https://127.0.0.1:8080", "https://127.0.0.1:8443"
-MAN, APP = "https://127.0.0.1:8081", "http://127.0.0.1:8082"
+CA, APP = "https://127.0.0.1:8081", "http://127.0.0.1:8082"
 
 sys.path.insert(0, str(ROOT / "vpp-server"))
 from app import availability as av  # noqa: E402
@@ -132,7 +132,7 @@ def ra_identity(name: str, org_unit: str | None = None):
         attrs.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, org_unit))
     csr = (x509.CertificateSigningRequestBuilder()
            .subject_name(x509.Name(attrs)).sign(key, hashes.SHA256()))
-    r = requests.post(f"{MAN}/ra/issue",
+    r = requests.post(f"{CA}/ra/issue",
                       json={"csr": csr.public_bytes(serialization.Encoding.PEM).decode()},
                       verify=CA_FILE)
     if not r.ok:
@@ -155,8 +155,7 @@ def bind_and_declare(key, cert_pem, client, calendar) -> str:
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption())
     token = jwt.encode({"vpp_url": VPP, "vpp_mtls_url": MTLS,
-                        "cert_vpp": (CERTS / "vpp.crt").read_text(),
-                        "cert_ra": (CERTS / "CA.crt").read_text()},
+                        "cert_vpp": (CERTS / "vpp.crt").read_text()},
                        key_pem, algorithm="RS256",
                        headers={"x5c": [x5c], "typ": "application/pairing+json"})
     proof = requests.post(f"{APP}/pair", json={"jws": token}).json()["owner_proof"]

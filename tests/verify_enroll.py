@@ -13,7 +13,7 @@ from cryptography.x509.oid import NameOID
 ROOT = Path(__file__).resolve().parent.parent
 CA_FILE = str(ROOT / "certs" / "CA.crt")
 VPP = "https://127.0.0.1:8080"
-MAN = "https://127.0.0.1:8081"
+CA = "https://127.0.0.1:8081"
 
 passed = 0
 
@@ -49,7 +49,7 @@ def ra_issued_user_cert(cn: str):
         .sign(key, hashes.SHA256())
     )
     csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode()
-    r = requests.post(f"{MAN}/ra/issue", json={"csr": csr_pem}, verify=CA_FILE)
+    r = requests.post(f"{CA}/ra/issue", json={"csr": csr_pem}, verify=CA_FILE)
     if not r.ok:
         die(f"RA /ra/issue -> {r.status_code} {r.text}")
     return key, r.json()["certificate"]
@@ -112,7 +112,7 @@ def main():
         if body["status"] == "enrolled" else die(f"unexpected status {body['status']}")
 
     vpp_cert = x509.load_pem_x509_certificate(body["vpp_certificate"].encode())
-    ok("VPP returned Cert_VPP and it chains to the RA") \
+    ok("VPP returned Cert_VPP and it chains to the CA") \
         if chains_to_ca(vpp_cert, ca) else die("Cert_VPP does not chain to RA")
 
     print("G3: account persisted")
@@ -120,10 +120,10 @@ def main():
     ok("re-enroll of the same user -> already-enrolled (account persisted)") \
         if r2.json()["status"] == "already-enrolled" else die("account not persisted")
 
-    print("G4: a certificate not issued by the RA is rejected")
+    print("G4: a certificate not issued by the CA is rejected")
     r3 = requests.post(f"{VPP}/enroll", json={"certificate": self_signed("rogue")},
                        verify=CA_FILE)
-    ok("self-signed (non-RA) certificate rejected (403)") \
+    ok("self-signed (foreign) certificate rejected (403)") \
         if r3.status_code == 403 else die(f"expected 403, got {r3.status_code}")
 
     print("G5: a genuine but expired certificate is rejected")

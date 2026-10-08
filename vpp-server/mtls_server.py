@@ -48,7 +48,7 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self):
-        # The client cert was already validated against the RA by the TLS layer
+        # The client cert was already validated against the CA root by the TLS layer
         # (CERT_REQUIRED + CA.crt). Read it and identify the enrolled user.
         der = self.connection.getpeercert(binary_form=True)
         cert = x509.load_der_x509_certificate(der)
@@ -63,7 +63,7 @@ class Handler(BaseHTTPRequestHandler):
 
         user = db.get_user(subject)
         if user is None:
-            return self._json(403, {"error": "valid RA certificate but not enrolled",
+            return self._json(403, {"error": "valid platform certificate but not enrolled",
                                     "subject": subject})
 
         if self.path == "/session":
@@ -90,7 +90,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(404, {"error": "not found"})
 
     def do_POST(self):
-        # The client certificate was already validated against the RA by the TLS
+        # The client certificate was already validated against the CA root by the TLS
         # layer; who it identifies depends on the endpoint (the user forwards the
         # owner proof, the appliance registers itself as a VEN).
         der = self.connection.getpeercert(binary_form=True)
@@ -130,7 +130,7 @@ class Handler(BaseHTTPRequestHandler):
         signed nor roll it back.
         """
         if db.get_user(user_subject) is None:
-            return self._json(403, {"error": "valid RA certificate but not enrolled"})
+            return self._json(403, {"error": "valid platform certificate but not enrolled"})
 
         ven = body.get("ven", "")
         appliance = db.get_appliance(ven)
@@ -170,7 +170,7 @@ class Handler(BaseHTTPRequestHandler):
     def _owner_proof(self, user_subject: str, body: dict):
         """Registration: bind an appliance to the user authenticated here."""
         if db.get_user(user_subject) is None:
-            return self._json(403, {"error": "valid RA certificate but not enrolled",
+            return self._json(403, {"error": "valid platform certificate but not enrolled",
                                     "subject": user_subject})
         try:
             bound = owner_proof.verify(body.get("owner_proof", ""), user_subject)
@@ -199,7 +199,7 @@ class Handler(BaseHTTPRequestHandler):
         """Operational step 2: the DR operator requests a reduction; the VPP
         selects the participants, or reports that it cannot be served.
 
-        The operator is recognised by the role attribute in its RA-issued
+        The operator is recognised by the role attribute in its
         certificate (OU=role=operator). PROTOTYPE LIMITATION: the RA currently
         honours whatever subject a CSR asks for, so this role is not enforced at
         issuance; a real deployment would have the RA validate role attributes.
@@ -219,7 +219,7 @@ class Handler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _is_operator(cert) -> bool:
-        """The DR operator is recognised by a role attribute in its RA certificate.
+        """The DR operator is recognised by a role attribute in its certificate.
 
         PROTOTYPE LIMITATION: the RA honours whatever subject a CSR asks for, so
         the role is not enforced at issuance; a real deployment would have the RA
@@ -357,7 +357,7 @@ class QuietServer(ThreadingHTTPServer):
 
 def main():
     db.initialize()
-    crypto_service.initialize()  # loads the VPP identity + the RA trust anchor
+    crypto_service.initialize()  # loads the VPP identity + the CA root
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(str(CERTS / "vpp.crt"), str(CERTS / "vpp.key"))
     ctx.load_verify_locations(str(CERTS / "CA.crt"))

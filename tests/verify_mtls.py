@@ -15,7 +15,7 @@ from cryptography.x509.oid import NameOID
 ROOT = Path(__file__).resolve().parent.parent
 CA_FILE = str(ROOT / "certs" / "CA.crt")
 VPP = "https://127.0.0.1:8080"
-MAN = "https://127.0.0.1:8081"
+CA = "https://127.0.0.1:8081"
 MTLS = "https://127.0.0.1:8443"
 
 passed = 0
@@ -48,7 +48,7 @@ def ra_cert(cn: str):
     csr = (x509.CertificateSigningRequestBuilder()
            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)]))
            .sign(key, hashes.SHA256()))
-    r = requests.post(f"{MAN}/ra/issue",
+    r = requests.post(f"{CA}/ra/issue",
                       json={"csr": csr.public_bytes(serialization.Encoding.PEM).decode()},
                       verify=CA_FILE)
     if not r.ok:
@@ -97,13 +97,13 @@ def main():
             requests.get(f"{MTLS}/session", cert=(scf, skf), verify=CA_FILE)
             die("self-signed client cert was accepted")
         except (SSLError, ConnectionError) as e:
-            ok(f"non-RA (self-signed) client cert rejected ({type(e).__name__})")
+            ok(f"self-signed (foreign) client cert rejected ({type(e).__name__})")
 
         print("G4: an RA cert that was never enrolled is not authorized")
         gkey, gcert = ra_cert(f"ghost-{secrets.token_hex(3)}")  # NOT enrolled
         gcf, gkf = write_pair("ghost", gkey, gcert)
         r = requests.get(f"{MTLS}/session", cert=(gcf, gkf), verify=CA_FILE)
-        ok("valid RA cert but no account -> 403") if r.status_code == 403 \
+        ok("valid platform cert but no account -> 403") if r.status_code == 403 \
             else die(f"expected 403, got {r.status_code} {r.text}")
 
         print(f"\nMUTUAL TLS COMPLETE: {passed} checks passed.")

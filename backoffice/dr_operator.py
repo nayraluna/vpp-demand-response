@@ -22,7 +22,7 @@ CRT_FILE = Path(__file__).resolve().parent / "operator.crt"
 
 
 def init_credential(force: bool = False) -> tuple[str, str]:
-    """Issue (or reuse) the operator credential: an RA certificate whose subject
+    """Issue (or reuse) the operator credential: a certificate whose subject
     carries OU=role=operator. The private key never leaves this machine.
 
     With `force` and a credential already on disk this is a renewal: the
