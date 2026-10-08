@@ -1,20 +1,20 @@
 # Secure Demand Response Platform for Virtual Power Plants using Residential IoT Devices
 
-A platform where households prove their electricity reductions **cryptographically**, so a grid operator can pay for a curtailment that actually happened, without ever monitoring what people do at home.
+Households prove their electricity reductions **cryptographically**, so a grid operator can pay for a curtailment that happened without monitoring what people do at home.
 
 Bachelor's thesis, URV, 2026.
 
 ## The problem
 
-Demand response (DR) works today with large industrial consumers: when the grid is strained, they cut consumption and get paid. Extending it to homes runs into two obstacles.
+Demand response (DR) works today with large industrial consumers: when the grid is strained they cut consumption and get paid. Extending it to homes has two obstacles.
 
-**Proof.** The operator has to know the reduction really happened. Continuous metering would prove it and would also reveal when you shower, cook or sleep.
+**Proof.** The operator needs to know the reduction happened. Continuous metering would prove it, and would also reveal when you shower, cook or sleep.
 
-**Trust.** The home is not a trusted environment and the coordinator is not trusted to respect what the user agreed to.
+**Trust.** The home is not a trusted environment, and the coordinator is not trusted to respect what the user agreed to.
 
-This platform answers both with cryptography instead of surveillance. The user declares *when* each appliance may be curtailed, the appliance itself enforces that declaration, and no reward exists without a signed proof the platform has verified.
+The platform answers both with cryptography instead of surveillance. The user declares *when* each appliance may be curtailed, the appliance enforces that declaration itself, and no reward exists without a signed proof the platform has verified.
 
-## Project Components
+## Components
 
 | Component | Role | Stack |
 |---|---|---|
@@ -26,15 +26,15 @@ This platform answers both with cryptography instead of surveillance. The user d
 
 ![Deployment topology. The home network holds the mobile app and the appliance, the platform holds the CA and the VPP. Every connection is opened from the home outwards, so nothing reaches into the house.](docs/deployment-topology.png)
 
-## Security Design
+## Security design
 
-Everything rests on a single X.509 trust root.
+One X.509 root, P-256 keys throughout. RSA remains only on the DNIe.
 
-**Identity is certified, not declared.** The appliance's nominal power lives in its certificate subject (`OU=P=2000`). An appliance that inflates it at pairing is caught, because the value it signs must match the one in the certificate it presents. Binding the two is what the check buys. Whether the certificate carried the true figure in the first place is the issuance gap below.
+**Identity is certified, not declared.** The appliance's nominal power is in its certificate subject (`OU=P=2000`). An appliance that inflates it at pairing is caught: the value it signs must match the certificate it presents.
 
-**Every channel that crosses the network is mutually authenticated.** The listener reads the client certificate off the TLS socket and maps its subject to an account and a role, so authentication and authorisation stay separate.
+**Every channel across the network is mutually authenticated.** The listener reads the client certificate off the TLS socket and maps its subject to an account and a role.
 
-**Every artefact that has to outlive the channel that carries it is signed as JWS**, because a channel proves who *delivered* a message, not who *produced* it:
+**Every artefact that outlives its channel is signed as JWS.** A channel proves who *delivered* a message, not who *produced* it.
 
 | Artefact | Signed by | Purpose |
 |---|---|---|
@@ -44,13 +44,13 @@ Everything rests on a single X.509 trust root.
 | Participation evidence | Appliance HSM | The signed record a reward requires |
 | Revocation and renewal requests | Operator, certificate holder | Carry their own certificate, because the CA's listener has no client certificates |
 
-The user's half of that never leaves the phone. The key is generated inside the Android Keystore and is non-exportable, so the app signs the CSR, the pairing bundle, the calendar and the mTLS handshake in place rather than holding key material it could leak.
+The user's key is generated in the Android Keystore and is non-exportable. The app signs the CSR, the pairing bundle, the calendar and the mTLS handshake in place.
 
-**The appliance enforces its owner's calendar locally.** Not even the platform's own coordinator can activate it outside the declared slots, its maximum curtailment time, or its recovery period. Activations reach it by outbound polling only, so nothing ever connects *into* the home. It trusts only the root installed at the factory next to its signing key, so a pairing bundle cannot bring its own.
+**The appliance enforces its owner's calendar locally.** Not even the coordinator can activate it outside the declared slots, its maximum curtailment time or its recovery period. Activations arrive by outbound polling only, so nothing connects *into* the home. The appliance trusts only the root installed at the factory next to its signing key.
 
-**Credentials can be withdrawn and renewed.** An operator revokes a certificate by serial with a signed request, and the CA publishes an X.509 CRL (RFC 5280) signed with the root key, with a monotonic CRL number and a 24 hour validity. Every leaf names it in its CRL distribution point. The VPP checks the list on every mutual-TLS request and at enrolment, and relays it to the appliance, which verifies it against its factory root, refuses one with a lower number and stops acting when its copy expires. The CA issues one live certificate per subject, and the VPP does not let a different certificate take over an enrolled account while the old one stands. Renewal re-keys under the same subject and revokes the old certificate as superseded in the same act.
+**Credentials are revoked and renewed.** An operator revokes by serial with a signed request. The CA publishes an RFC 5280 CRL signed with the root key, with a monotonic CRL number and a 24 hour validity, named in every leaf's distribution point. The VPP checks it on every mutual-TLS request and at enrolment, and relays it to the appliance, which verifies it against its factory root, refuses a lower number and stops acting when its copy expires. The CA issues one live certificate per subject. Renewal re-keys under the same subject and supersedes the old certificate in the same act.
 
-**Identity proof with the Spanish national eID.** The app reads the DNIe over NFC through a PACE secure channel, validates the card's chain up to the `AC RAIZ DNIE 2` root, and has the chip sign a freshly generated nonce with the user's PIN, so a copied public certificate cannot pass for a login.
+**Identity proof with the Spanish eID.** The app reads the DNIe over NFC through a PACE channel, validates the chain to `AC RAIZ DNIE 2`, and has the chip sign a fresh nonce with the user's PIN, so a copied public certificate cannot pass for a login.
 
 ## Verification
 
@@ -58,20 +58,13 @@ The user's half of that never leaves the phone. The key is generated inside the 
 powershell -ExecutionPolicy Bypass -File .\run_all.ps1
 ```
 
-The suite runs 16 gates and 184 checks. Every protocol step is exercised against its positive *and* its negative cases over the real stack, with real TLS and a real database: certificates outside the CA chain, invalid signatures, replayed activations, forged capacities, evidence submitted twice, revoked credentials at the mutual-TLS door, a rolled-back revocation list. The database is used as an attack vector too, planting a rolled-back calendar and one signed by a forged issuer directly into the row the appliance polls, to show the device refuses them on its own.
+16 gates, 184 checks. Every protocol step runs against its positive *and* its negative cases over the real stack, with real TLS and a real database: certificates outside the chain, invalid signatures, replayed activations, forged capacities, evidence submitted twice, revoked credentials at the mutual-TLS door, a rolled-back revocation list, and a rolled-back calendar planted directly in the row the appliance polls.
 
-The Android client is covered too. `RegistrationFlowTest` drives the real protocol clients against the live local servers from the JVM, which is why those clients import nothing from Android.
+`RegistrationFlowTest` drives the app's real protocol clients against the live servers from the JVM. `tests/verify_pi.py` runs a complete DR event against a Raspberry Pi over a real network (11 checks). Registration, QR pairing and DNIe login were completed on a physical phone.
 
-**On real hardware.** `tests/verify_pi.py` runs a complete DR event against a Raspberry Pi across a real network boundary (11 checks). Registration, QR pairing and DNIe authentication were completed on a physical phone.
+## Limitations
 
-## What this prototype does not do
-
-- **Revocation is a CRL, not OCSP.** Relying parties decide from a list they already hold, which is what an appliance without network access needs, and nothing answers live status queries. The DNIe's own revocation status is not checked.
-- **Issuance-side validation is missing.** The CA verifies possession of the key but not the identity behind it, nor the operator role attribute. Both checks belong in the RA role and currently rest on the requesting side.
-- **The HSM is emulated and the curtailment is simulated.** A signature proves the appliance produced the evidence, not that power flowed differently. Real metering behind the same signing boundary is the natural next step.
-- **Stored evidence is verified once, at submission.** No later path compares a participation row against the signature stored beside it, and the reward is computed from the row's own columns. A `reduction_pct` edited in the database would change a payout without invalidating anything. The availability path is the opposite: the appliance re-verifies the calendar on every poll, which is why a rolled-back row planted directly in the table is refused.
-- **Selection is a deterministic greedy heuristic**, not an optimisation. Fairness across households is not considered.
-- **Scale is untested.** One physical appliance, with fleet behaviour exercised through a synthetic population of 20 users and 40 appliances.
+The HSM is emulated, the curtailment is simulated, identity is not verified at issuance, and the PKI departs from enterprise practice in ways a reviewer would flag. Every item, with the standard and the fix, is in [docs/FUTURE_WORK.md](docs/FUTURE_WORK.md).
 
 ## Running it
 
@@ -83,21 +76,19 @@ python provision_all.py                      # root, then each component's own k
 powershell -ExecutionPolicy Bypass -File .\run_all.ps1
 ```
 
-That is the whole system verified against itself. Driving it by hand instead, with the phone, a Raspberry Pi and the synthetic fleet, is [RUNBOOK.md](RUNBOOK.md), and [TROUBLESHOOTING.md](TROUBLESHOOTING.md) covers what looks broken but is not.
+Driving it by hand, with the phone, a Raspberry Pi and the synthetic fleet, is [RUNBOOK.md](RUNBOOK.md). [TROUBLESHOOTING.md](TROUBLESHOOTING.md) covers what looks broken but is not.
 
-> **No key material of any kind is in this repository.** `provision_all.py` builds the entire PKI locally, each component generating its own key pair and obtaining its certificate from a CSR, and `*.key`, `*.pem`, `*.p12`, `*.crt` and friends are refused by `.gitignore` as patterns rather than paths, so a key written somewhere new is still caught. Two exceptions are explicit and public: the Spanish national police DNIe root, and the development CA root the Android app needs to compile.
+> **No key material is in this repository.** `provision_all.py` builds the PKI locally, each component generating its own key and obtaining its certificate from a CSR. `*.key`, `*.pem`, `*.p12`, `*.crt` and friends are refused by `.gitignore` as patterns, not paths. Two public exceptions: the DNIe root of the Spanish police, and the development CA root the Android app needs to compile.
 
 ## Building the Android app
 
-The app has its own [README](android-app/README.md) covering its architecture, how the session is stored and how the DNIe login proves possession of the card.
+The app has its own [README](android-app/README.md): architecture, session storage, and how the DNIe login proves possession of the card.
 
-The DNIe login needs the FNMT DNIeDroid SDK, which ships under its own terms, so it is not redistributed here. Request it from the FNMT and drop `dniedroid-release.aar` into `android-app/app/libs/`. Everything else builds once that file is present.
-
-The rest of the system, including the whole verification suite, runs without the Android project.
+The DNIe login needs the FNMT DNIeDroid SDK, which ships under its own terms and is not redistributed here. Request it from the FNMT and drop `dniedroid-release.aar` into `android-app/app/libs/`. The rest of the system, including the whole verification suite, runs without the Android project.
 
 ## About
 
-Built from the reference protocol of a research group at URV, developed together with the Graduate School of Engineering Science at Yokohama National University. My work was to take that design and turn it into a system that runs, and to verify that it does.
+Built from the reference protocol of a research group at URV, developed together with the Graduate School of Engineering Science at Yokohama National University. My work was to turn that design into a system that runs, and to verify that it does.
 
 ## License
 

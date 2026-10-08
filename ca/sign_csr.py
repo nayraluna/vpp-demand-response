@@ -19,7 +19,7 @@ def main() -> None:
     ap.add_argument("--profile", choices=sorted(ra_service.PROFILES), default="client")
     ap.add_argument("--san", default="", help="comma separated, TLS server profiles only")
     ap.add_argument("--days", type=int, default=365)
-    ap.add_argument("--supersedes", metavar="SERIAL",
+    ap.add_argument("--supersedes", metavar="SERIAL", type=ra_service.registry.normalize_serial,
                     help="renewal: the serial this certificate replaces, revoked as superseded")
     args = ap.parse_args()
 

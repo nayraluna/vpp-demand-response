@@ -1,4 +1,5 @@
 import datetime
+import re
 import sqlite3
 from pathlib import Path
 
@@ -51,7 +52,8 @@ def normalize_serial(text: str) -> str:
     """Hex as every tool prints it: case, colons, spaces and leading zeros do not matter."""
     s = text.strip().lower().replace(":", "").replace(" ", "")
     s = s[2:] if s.startswith("0x") else s
-    int(s or "x", 16)
+    if not re.fullmatch(r"[0-9a-f]+", s):
+        raise ValueError(f"serial is not hexadecimal: {text!r}")
     return s.lstrip("0") or "0"
 
 

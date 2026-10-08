@@ -26,15 +26,20 @@ def subject_for(ven: str, power: int) -> x509.Name:
     ])
 
 
+def write_key(path, key) -> None:
+    """Created 0600 from the start where the platform honours it (the Pi does, Windows does not)."""
+    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                            serialization.NoEncryption())
+    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as f:
+        f.write(pem)
+
+
 def request(ven: str, power: int, algo: str) -> None:
     key = (ec.generate_private_key(ec.SECP256R1()) if algo == "ec"
            else rsa.generate_private_key(public_exponent=65537, key_size=2048))
     subject = subject_for(ven, power)
     csr = x509.CertificateSigningRequestBuilder().subject_name(subject).sign(key, hashes.SHA256())
-    (HSM / "VEN.key").write_bytes(key.private_bytes(
-        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption()))
-    os.chmod(HSM / "VEN.key", 0o600)
+    write_key(HSM / "VEN.key", key)
     (HSM / "VEN.csr").write_bytes(csr.public_bytes(serialization.Encoding.PEM))
     print(f"appliance: key generated in the HSM, CSR for {subject.rfc4514_string()} at {HSM / 'VEN.csr'}")
 

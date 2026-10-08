@@ -21,8 +21,8 @@ openssl x509 -in certs/CA.crt -noout -text        # the root: subject, validity,
 openssl req  -in certs/vpp.csr -noout -text       # what the VPP asked for: subject and public key only
 openssl x509 -in certs/vpp.crt -noout -text       # what the CA issued: the profile's extensions and the SAN
 openssl verify -CAfile certs/CA.crt certs/VEN.crt # the chain: signature, dates and CA:TRUE on the issuer
-curl -sk https://127.0.0.1:8081/ra/crl -o crl.der && openssl crl -in crl.der -inform DER -noout -text -CAfile certs/CA.crt
-                                                  # the CRL: number, thisUpdate, nextUpdate, entries with reason, verify OK
+curl -sS --cacert certs/CA.crt https://127.0.0.1:8081/ra/crl -o crl.der   # CA running (step 2)
+openssl crl -in crl.der -inform DER -noout -text -CAfile certs/CA.crt      # number, dates, entries with reason, verify OK
 ```
 
 ---
@@ -253,7 +253,7 @@ the app has to hand that same address to the appliance during pairing, because
 a Raspberry Pi can never reach a `127.0.0.1` it was given:
 
 ```bash
-EXTRA_SAN_IPS="<pc-lan-address>" python provision_all.py
+EXTRA_SAN_IPS="<pc-lan-address>" TFG_CRL_URL="https://<pc-lan-address>:8081/ra/crl" python provision_all.py
 echo "vpp.lan.host=<pc-lan-address>" >> android-app/local.properties
 ```
 

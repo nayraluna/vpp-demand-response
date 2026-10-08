@@ -103,9 +103,7 @@ def crl_view(crl: x509.CertificateRevocationList) -> dict:
     """The CRL's fields as a plain dict: number, issuer, dates, and one entry per serial."""
     def reason(e):
         try:
-            reason = e.extensions.get_extension_for_class(x509.CRLReason).value.reason.name
-            head, *rest = reason.split("_")
-            return head + "".join(w.capitalize() for w in rest)
+            return e.extensions.get_extension_for_class(x509.CRLReason).value.reason.value
         except x509.ExtensionNotFound:
             return "unspecified"
     return {"crl_number": crl.extensions.get_extension_for_class(x509.CRLNumber).value.crl_number,
@@ -351,7 +349,7 @@ def main():
         with sqlite3.connect(str(DB_FILE)) as c:
             c.execute("DELETE FROM activations WHERE activation_id IN (?, ?)", (act_a, act_b))
 
-        print("G13: with the CA unreachable, the VPP serves its copy only until next_update")
+        print("G13: with the CA unreachable, the VPP serves its copy only until nextUpdate")
         # The VPP's verifier in-process, pointed at a dead port, holding the list it would have cached.
         sys.path.insert(0, str(ROOT / "vpp-server"))
         from app import revocation  # noqa: E402

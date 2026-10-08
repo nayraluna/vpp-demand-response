@@ -48,10 +48,10 @@ def init_credential(force: bool = False) -> tuple[str, str]:
         raise SystemExit(f"operator credential refused: HTTP {r.status_code} "
                          f"{r.json().get('detail', r.text)}")
     CRT_FILE.write_text(r.json()["certificate"])
-    KEY_FILE.write_bytes(key.private_bytes(
-        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption()))
-    os.chmod(KEY_FILE, 0o600)
+    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                            serialization.NoEncryption())
+    with os.fdopen(os.open(KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as f:
+        f.write(pem)
     return str(CRT_FILE), str(KEY_FILE)
 
 
@@ -114,9 +114,7 @@ def show_crl() -> None:
         print("  (no revoked certificates)")
     for e in crl:
         try:
-            name = e.extensions.get_extension_for_class(x509.CRLReason).value.reason.name
-            head, *rest = name.split("_")
-            reason = head + "".join(w.capitalize() for w in rest)
+            reason = e.extensions.get_extension_for_class(x509.CRLReason).value.reason.value
         except x509.ExtensionNotFound:
             reason = "unspecified"
         print(f"  {format(e.serial_number, 'x')}  {e.revocation_date_utc.isoformat()[:19]}  {reason}")
@@ -169,7 +167,7 @@ def main() -> None:
     rv = sub.add_parser("revoke", help="revoke a certificate issued by the CA")
     rv.add_argument("--serial", required=True, help="hex serial of the certificate")
     rv.add_argument("--reason", default="unspecified",
-                    help="keyCompromise, cessationOfOperation, superseded...")
+                    help="keyCompromise, cACompromise, affiliationChanged, superseded, cessationOfOperation, privilegeWithdrawn")
     sub.add_parser("crl", help="fetch and print the current revocation list")
 
     args = parser.parse_args()

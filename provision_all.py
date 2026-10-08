@@ -25,7 +25,7 @@ def run(*args: str) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--algo", choices=("rsa", "ec"), default="ec",
-                    help="key algorithm for every platform identity (P-256 by default, RSA-2048 on request)")
+                    help="key algorithm for every platform identity (P-256 by default, RSA on request: 4096 for the root, 2048 for the leaves)")
     ap.add_argument("--san", default=os.environ.get("EXTRA_SAN_IPS", ""),
                     help="extra TLS addresses, comma separated (defaults to EXTRA_SAN_IPS)")
     args = ap.parse_args()

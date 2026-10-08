@@ -97,9 +97,7 @@ def crl_entry(crl: x509.CertificateRevocationList, serial: str) -> dict | None:
     if e is None:
         return None
     try:
-        name = e.extensions.get_extension_for_class(x509.CRLReason).value.reason.name
-        head, *rest = name.split("_")
-        reason = head + "".join(w.capitalize() for w in rest)
+        reason = e.extensions.get_extension_for_class(x509.CRLReason).value.reason.value
     except x509.ExtensionNotFound:
         reason = "unspecified"
     return {"serial": serial, "reason": reason}

@@ -41,17 +41,14 @@ class NotOperator(Exception):
 # A relying party whose copy is older than this must refresh it, and refuses to act if it cannot.
 CRL_VALIDITY = datetime.timedelta(hours=24)
 # Where relying parties fetch the list; written into every leaf as its CRL distribution point.
-CRL_URL = os.environ.get("TFG_CRL_URL", "https://127.0.0.1:8081/ra/crl")
+CRL_URL = os.environ.get("TFG_CRL_URL", "https://ca.vpp.local:8081/ra/crl")
 
 
-def _camel(name: str) -> str:
-    head, *rest = name.split("_")
-    return head + "".join(w.capitalize() for w in rest)
-
-
-# RFC 5280 reason codes by their usual names (keyCompromise, superseded, ...). "unspecified"
-# is accepted but encoded as no reason at all, as the RFC asks.
-REASONS = {_camel(f.name): f for f in ReasonFlags if f not in (ReasonFlags.unspecified, ReasonFlags.remove_from_crl)}
+# RFC 5280 reason codes by their RFC identifiers (keyCompromise, cACompromise, superseded, ...).
+# "unspecified" is accepted but encoded as no reason at all, as the RFC asks. certificateHold is
+# not offered: the register has no release path, so a hold here would be a permanent revocation.
+REASONS = {f.value: f for f in ReasonFlags
+           if f not in (ReasonFlags.unspecified, ReasonFlags.certificate_hold, ReasonFlags.remove_from_crl)}
 REASONS["unspecified"] = None
 
 
@@ -116,7 +113,8 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
         raise InvalidCSR("CSR self-signature does not verify")
     if not csr.subject.rdns:
         raise InvalidCSR("CSR has an empty subject")
-    if csr.subject == _ca_cert.subject:
+    if sorted((a.oid.dotted_string, a.value) for a in csr.subject) == \
+            sorted((a.oid.dotted_string, a.value) for a in _ca_cert.subject):
         raise InvalidCSR("CSR asks for the CA's own name")
 
     public_key = csr.public_key()
