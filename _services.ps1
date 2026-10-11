@@ -2,7 +2,7 @@
 # Single source for the port list, the certificate paths and the venv lookup,
 # so a change to any of them cannot land in one script and miss another.
 
-$Ports = 8080, 8081, 8082, 8443
+$Ports = 8080, 8081, 8082, 8083, 8443
 
 function Find-Python($root) {
     $venv = "$root\.venv\Scripts\python.exe"

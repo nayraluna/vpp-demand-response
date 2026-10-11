@@ -21,7 +21,7 @@ openssl x509 -in certs/CA.crt -noout -text        # the root: subject, validity,
 openssl req  -in certs/vpp.csr -noout -text       # what the VPP asked for: subject and public key only
 openssl x509 -in certs/vpp.crt -noout -text       # what the CA issued: the profile's extensions and the SAN
 openssl verify -CAfile certs/CA.crt certs/VEN.crt # the chain: signature, dates and CA:TRUE on the issuer
-curl -sS --cacert certs/CA.crt https://127.0.0.1:8081/ra/crl -o crl.der   # CA running (step 2)
+curl -sS http://127.0.0.1:8083/ra/crl -o crl.der                          # CA running (step 2), plain HTTP
 openssl crl -in crl.der -inform DER -noout -text -CAfile certs/CA.crt      # number, dates, entries with reason, verify OK
 ```
 
@@ -35,7 +35,7 @@ powershell -ExecutionPolicy Bypass -File .\run_all.ps1
 
 Ends in `ALL GATES PASSED`.
 
-The script frees ports 8080, 8081, 8082 and 8443 before starting, so the gates
+The script frees ports 8080, 8081, 8082, 8083 and 8443 before starting, so the gates
 always run against their own services with their own environment. A failing
 gate is therefore a real failure. Investigate it rather than re-running.
 
@@ -235,7 +235,7 @@ a lower bound. Reference p50 and p95: issuance 20 and 23 ms, enrolment 24 and
 The services run with a hidden window, so stop them by port:
 
 ```powershell
-foreach ($p in 8080, 8081, 8082, 8443) {
+foreach ($p in 8080, 8081, 8082, 8083, 8443) {
     Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
 }
@@ -253,7 +253,7 @@ the app has to hand that same address to the appliance during pairing, because
 a Raspberry Pi can never reach a `127.0.0.1` it was given:
 
 ```bash
-EXTRA_SAN_IPS="<pc-lan-address>" TFG_CRL_URL="https://<pc-lan-address>:8081/ra/crl" python provision_all.py
+EXTRA_SAN_IPS="<pc-lan-address>" TFG_CRL_URL="http://<pc-lan-address>:8083/ra/crl" python provision_all.py
 echo "vpp.lan.host=<pc-lan-address>" >> android-app/local.properties
 ```
 

@@ -5,7 +5,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import NameOID
 
-from . import crypto_service
+from . import crypto_service, revocation
 
 
 class InvalidOwnerProof(Exception):
@@ -42,6 +42,9 @@ def verify(jws_token: str, authenticated_user: str) -> dict:
         raise InvalidOwnerProof("appliance certificate not issued by the CA")
     if not crypto_service.within_validity(ven_cert):
         raise InvalidOwnerProof("appliance certificate expired or not yet valid")
+    # The user forwards this proof, so the appliance's certificate never crossed the mTLS door.
+    if revocation.is_revoked(ven_cert):
+        raise InvalidOwnerProof("appliance certificate is revoked")
 
     ven_pub = ven_cert.public_key().public_bytes(
         serialization.Encoding.PEM,

@@ -40,8 +40,9 @@ class NotOperator(Exception):
 
 # A relying party whose copy is older than this must refresh it, and refuses to act if it cannot.
 CRL_VALIDITY = datetime.timedelta(hours=24)
-# Where relying parties fetch the list; written into every leaf as its CRL distribution point.
-CRL_URL = os.environ.get("TFG_CRL_URL", "https://ca.vpp.local:8081/ra/crl")
+# The CRL distribution point written into every leaf. It must resolve for any client that follows
+# it (Windows schannel does, and fails closed): loopback in development, the LAN address for a Pi.
+CRL_URL = os.environ.get("TFG_CRL_URL", "http://127.0.0.1:8083/ra/crl")
 
 
 # RFC 5280 reason codes by their RFC identifiers (keyCompromise, cACompromise, superseded, ...).

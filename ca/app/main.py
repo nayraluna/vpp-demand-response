@@ -1,16 +1,52 @@
+import os
+import threading
 from contextlib import asynccontextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel
 
 from . import ra_service, registry
 
+CRL_HTTP_PORT = int(os.environ.get("TFG_CRL_HTTP_PORT", "8083"))
+
+
+class _CrlHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path != "/ra/crl":
+            self.send_error(404)
+            return
+        body = ra_service.crl_der()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/pkix-crl")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+def _serve_crl_over_http() -> ThreadingHTTPServer | None:
+    """The CRL is signed, so it needs no TLS, and fetching it must not depend on a TLS
+    check that could itself need the CRL. This listener serves the CRL and nothing else."""
+    try:
+        server = ThreadingHTTPServer(("0.0.0.0", CRL_HTTP_PORT), _CrlHandler)
+    except OSError as e:
+        print(f"[ca] CRL over HTTP not started on :{CRL_HTTP_PORT}: {e}")
+        return None
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ra_service.initialize()
-    print("[ca] CA loaded; ready to issue certificates")
+    crl_http = _serve_crl_over_http()
+    print(f"[ca] CA loaded; CRL also served over HTTP on :{CRL_HTTP_PORT}")
     yield
+    if crl_http:
+        crl_http.shutdown()
 
 
 app = FastAPI(title="Certificate Authority (CA)", version="0.2.0", lifespan=lifespan)

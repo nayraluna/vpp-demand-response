@@ -104,5 +104,6 @@ is **not** implemented, a documented gap.
 - The calendar keeps the protocol's 48 half-hour slots per day on the wire. The
   UI edits at 1-hour granularity, so each hour maps to two slots.
 - **Two gaps remain**: the DNIe's revocation status is not checked
-  (`data/security/DnieAuth.kt`), and the certificate CN is the raw DNI rather
-  than a pseudonym assigned by the RA (`data/repository/UserRepositoryImpl.kt`).
+  (`data/security/DnieAuth.kt`), and the certificate CN is a pseudonym the app
+  picks rather than one the RA assigns after verifying the DNIe itself. The DNI
+  never leaves the phone.

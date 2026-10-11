@@ -151,6 +151,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(403, {"error": str(e)})
         except owner_proof.InvalidOwnerProof as e:
             return self._json(400, {"error": str(e)})
+        except revocation.Unavailable as e:
+            return self._json(503, {"error": str(e)})
 
         # Parameters come from the verified payload; the proof signature itself is not stored.
         db.add_appliance(

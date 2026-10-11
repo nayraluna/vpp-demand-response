@@ -13,8 +13,9 @@ from . import db
 CERTS_DIR = Path(__file__).resolve().parent.parent.parent / "certs"
 CA_CERT_FILE = CERTS_DIR / "CA.crt"
 
+# Plain HTTP on purpose: the CRL is checked by its signature, not by the channel.
+CRL_URL = os.environ.get("TFG_CRL_FETCH_URL", "http://127.0.0.1:8083/ra/crl")
 # Seconds a cached list may age before refresh; run_all.ps1 sets 0 so gates see revocations at once.
-CA_URL = os.environ.get("TFG_CA_URL", "https://127.0.0.1:8081")
 MAX_AGE = float(os.environ.get("TFG_CRL_MAX_AGE", "300"))
 
 _lock = threading.Lock()
@@ -49,7 +50,7 @@ def number(crl: x509.CertificateRevocationList) -> int:
 
 
 def _fetch() -> tuple[str, x509.CertificateRevocationList]:
-    r = requests.get(f"{CA_URL}/ra/crl", verify=str(CA_CERT_FILE), timeout=5)
+    r = requests.get(CRL_URL, timeout=5)
     r.raise_for_status()
     der_b64 = base64.b64encode(r.content).decode()
     return der_b64, load(der_b64)

@@ -42,8 +42,8 @@ expiry and OCSP against the police responder, verifies the signature, and only
 then approves the request for the CA to sign. The RA keeps the mapping from DNI
 to platform pseudonym in its own database and can enforce one credential per
 person. The DNIe certificate never enters the platform certificate, so the
-pseudonym is preserved. This mirrors how EST or CMP enrol with an existing
-credential. Medium.
+pseudonym would be bound to a verified person. This mirrors how EST or CMP enrol
+with an existing credential. Medium.
 
 ### The operator role is self declared
 `backoffice/dr_operator.py init` builds a CSR with `OU=role=operator` and the
@@ -57,16 +57,16 @@ an authenticated onboarding, and the RA sets the role itself from that
 decision. In production the operator credential would also be short lived and
 stored in an HSM or smart card. Medium.
 
-### The user subject is the DNI, and the key is not attested
-After a DNIe login the certificate's CN is the DNI itself, so the national
-identifier travels in the x5c header of every calendar and in the pairing
-bundle over plain HTTP. Without a DNIe the app picks `CN=android-<random>`,
-which nothing ties to a person. The Keystore key is generated without an
-attestation challenge, so the RA cannot tell a hardware key from a software
-one.
+### The pseudonym is the app's, and the key is not attested
+The certificate CN is `android-<48 random bits>`, picked by the app, and the
+DNI stays on the phone. Nothing on the platform side ties the pseudonym to a
+person, and one person can register twice. The Keystore key is generated
+without an attestation challenge, so the RA cannot tell a hardware key from a
+software one.
 
-Fix: with the DNIe binding above, the RA assigns the pseudonym, and the app
-sends the Android key attestation chain with the CSR. Medium.
+Fix: with the DNIe binding above, the RA assigns the pseudonym and keeps the
+DNI mapping, and the app sends the Android key attestation chain with the CSR.
+Medium.
 
 ### Attributes and roles live in the subject DN
 `OU=P=2000` and `OU=role=operator` are copied from the CSR and parsed by prefix
@@ -121,7 +121,8 @@ once the new one is confirmed in use. Fix: a grace window in
 ### Revocation is a CRL, not OCSP, and the app never consumes it
 Relying parties decide from a list they already hold, which is what an
 appliance without network access needs, and nothing answers live status
-queries. The Android app verifies the appliance and VPP certificates against
+queries. The CRL is served over plain HTTP on :8083, as distribution points
+are, since it is checked by its signature. The Android app verifies the appliance and VPP certificates against
 the root but never fetches the CRL. Small for the app, medium for OCSP.
 
 ### The app validates the platform chain with a raw signature check
@@ -307,3 +308,6 @@ population of 20 users and 40 appliances.
   certificate, its profile and who revoked it, serials accepted as any tool
   prints them, issuer checks require a valid CA and an end entity leaf
   (a000510).
+- The certificate CN is a pseudonym and the DNI stays on the phone, the CRL is
+  served over plain HTTP and named so in every distribution point, and the
+  appliance certificate inside an owner proof is checked against the CRL.

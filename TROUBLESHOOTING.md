@@ -45,7 +45,8 @@ selection, so the activation goes to a `syn-*` device and nothing executes.
 The local pairing channel is HTTP by design, protected by signed artefacts
 rather than by the transport. Calling `https://127.0.0.1:8082` returns a
 schannel error `SEC_E_INVALID_TOKEN`. That is the client refusing to speak TLS
-to a plaintext port, not a broken service.
+to a plaintext port, not a broken service. Port 8083, where the CA serves its
+CRL, is plain HTTP for the same reason: the CRL is signed.
 
 ## Port 8443 missing from the startup table
 

@@ -37,7 +37,7 @@ class DnieLoginActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private lateinit var dnieAuth: DnieAuth
     private var nfcAdapter: NfcAdapter? = null
 
-    // Handed to registration on "use this identity": the CSR's CN becomes the DNI.
+    // Handed to registration on "use this identity"; the DNI stays on the phone.
     private var lastResult: DnieAuth.Result? = null
 
     // onTagDiscovered runs on a binder thread, so the CAN is mirrored here, not read off the EditText.

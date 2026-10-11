@@ -25,6 +25,7 @@ VPP = "https://127.0.0.1:8080"
 CA = "https://127.0.0.1:8081"
 MTLS = "https://127.0.0.1:8443"
 APP = "http://127.0.0.1:8082"
+CRL_HTTP = "http://127.0.0.1:8083/ra/crl"
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 passed = 0
@@ -203,6 +204,15 @@ def main():
         ok(f"CRL #{n0} signed by the CA, issuer {crl['issuer']}")
         ok("the new certificate is not listed") if not listed(crl, userial) \
             else die("fresh certificate already in the CRL")
+        r = requests.get(CRL_HTTP, timeout=5)
+        plain = x509.load_der_x509_crl(r.content)
+        ok(f"the same CRL over plain HTTP, trusted for its signature alone (#{crl_view(plain)['crl_number']})") \
+            if plain.is_signature_valid(root_cert().public_key()) and crl_view(plain)["crl_number"] == n0 \
+            else die("the CRL served over HTTP does not verify or differs")
+        cdp = ucert.extensions.get_extension_for_class(x509.CRLDistributionPoints).value
+        url = cdp[0].full_name[0].value
+        ok(f"the certificate names a plain HTTP distribution point ({url})") if url.startswith("http://") \
+            else die(f"distribution point is not plain HTTP: {url}")
 
         print("G2: only an operator may revoke")
         pkey, ppem, _, _ = ra_identity(f"plain-{secrets.token_hex(3)}")
@@ -353,7 +363,7 @@ def main():
         # The VPP's verifier in-process, pointed at a dead port, holding the list it would have cached.
         sys.path.insert(0, str(ROOT / "vpp-server"))
         from app import revocation  # noqa: E402
-        revocation.CA_URL, revocation.MAX_AGE = "https://127.0.0.1:1", 0
+        revocation.CRL_URL, revocation.MAX_AGE = "http://127.0.0.1:1/ra/crl", 0
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         now = datetime.datetime.now(datetime.timezone.utc)
         revocation._crl = make_crl(key, root_cert().subject, 1, now + datetime.timedelta(hours=1))
@@ -366,6 +376,29 @@ def main():
             die("an expired list was served while the CA is down")
         except revocation.Unavailable as e:
             ok(f"past nextUpdate the VPP refuses to decide: {str(e)[:60]}")
+
+        print("G14: an owner proof from a revoked appliance is refused")
+        # The user forwards the proof over their own channel, so the appliance never meets the door check.
+        hkey, hpem, hcert, _ = ra_identity(f"holder-{secrets.token_hex(3)}")
+        requests.post(f"{VPP}/enroll", json={"certificate": hpem}, verify=CA_FILE)
+        akey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        aname = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"ven-{secrets.token_hex(3)}"),
+                           x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "P=1500"),
+                           x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Appliances")])
+        acsr = x509.CertificateSigningRequestBuilder().subject_name(aname).sign(akey, hashes.SHA256())
+        r = requests.post(f"{CA}/ra/issue", verify=CA_FILE,
+                          json={"csr": acsr.public_bytes(serialization.Encoding.PEM).decode()})
+        apem = r.json()["certificate"]
+        aserial = format(x509.load_pem_x509_certificate(apem.encode()).serial_number, "x")
+        if revoke(okey, opem, aserial, "keyCompromise").status_code != 200:
+            die("could not revoke the test appliance")
+        proof = sign_as(akey, apem, {"ven": aname.rfc4514_string(), "owner": hcert.subject.rfc4514_string(),
+                                     "P": 1500, "max": 60, "rec": 30}, "application/owner-proof+json")
+        r = requests.post(f"{MTLS}/appliances/owner-proof", json={"owner_proof": proof},
+                          cert=write_pair("holder", hkey, hpem), verify=CA_FILE)
+        ok(f"owner proof refused ({r.status_code}: {r.json().get('error')})") \
+            if r.status_code == 400 and "revoked" in r.text \
+            else die(f"owner proof from a revoked appliance accepted: {r.status_code} {r.text}")
 
         print(f"\nREVOCATION COMPLETE: {passed} checks passed.")
     finally:
