@@ -60,6 +60,10 @@ def main():
     ca = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
 
     print("G1: PKI chain")
+    bc = ca.extensions.get_extension_for_class(x509.BasicConstraints)
+    ok("root is CA:TRUE with pathLen 0, critical: no CA may sit below it") \
+        if bc.critical and bc.value.ca and bc.value.path_length == 0 \
+        else die(f"root BasicConstraints {bc.value} critical={bc.critical}")
     for name in ["vpp", "server", "VEN"]:
         cert = x509.load_pem_x509_certificate((CERTS / f"{name}.crt").read_bytes())
         if chains_to_ca(cert, ca):

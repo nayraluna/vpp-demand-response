@@ -64,7 +64,9 @@ def main() -> None:
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - datetime.timedelta(minutes=5))
         .not_valid_after(now + datetime.timedelta(days=args.days))
-        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        # pathLen 0: this root certifies end entities only, so a CA certificate signed by
+        # mistake cannot issue anything a validator accepts. A hierarchy needs a new root.
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
         # A root signs certificates and CRLs, nothing else.
         .add_extension(x509.KeyUsage(
             digital_signature=False, content_commitment=False, key_encipherment=False,
