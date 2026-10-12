@@ -13,15 +13,15 @@ Anything that looks like a failure but is not is in
 - Raspberry Pi off
 - Activate the venv in every new terminal: `.venv\Scripts\activate`.
 
-To see what the PKI actually contains, `inspect_pki.sh` runs the OpenSSL
-commands for each object and says what to look for (Git Bash, or on the Pi):
+To see what the PKI contains, `inspect_pki.sh` prints each standard OpenSSL
+command with its output (Git Bash, or on the Pi):
 
 ```bash
-bash inspect_pki.sh cert certs/vpp.crt   # tbsCertificate, extensions, ASN.1 tree, chain and purpose
-bash inspect_pki.sh csr certs/VEN.csr    # what a requester asks for
-bash inspect_pki.sh crl                  # the CRL, and each certificate checked against it (step 2 running)
-bash inspect_pki.sh tls                  # what each listener negotiates (step 2 running)
-bash inspect_pki.sh                      # every section
+bash inspect_pki.sh cert   # a certificate, the root's constraints, the chain, the EKU enforced
+bash inspect_pki.sh csr    # a certificate request and its proof of possession
+bash inspect_pki.sh crl    # the CRL, a valid and a revoked certificate against it (step 2 running)
+bash inspect_pki.sh mtls   # mutual TLS with and without a client certificate (step 2 running)
+bash inspect_pki.sh        # all four
 ```
 
 ---
