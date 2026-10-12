@@ -17,11 +17,11 @@ To see what the PKI contains, `inspect_pki.sh` prints each standard OpenSSL
 command with its output (Git Bash, or on the Pi):
 
 ```bash
-bash inspect_pki.sh cert   # a certificate, and its chain to the root
-bash inspect_pki.sh csr    # a certificate request and its proof of possession
-bash inspect_pki.sh crl    # the CRL, a valid and a revoked certificate against it (step 2 running)
-bash inspect_pki.sh mtls   # mutual TLS with and without a client certificate (step 2 running)
-bash inspect_pki.sh        # all four
+bash inspect_pki.sh cert CA    # a certificate and its chain to the root: CA, server, vpp, VEN, operator
+bash inspect_pki.sh csr VEN    # a certificate request and its proof of possession: VEN, vpp
+bash inspect_pki.sh crl        # the CRL, a valid and a revoked certificate against it (step 2 running)
+bash inspect_pki.sh mtls       # mutual TLS with and without a client certificate (step 2 running)
+bash inspect_pki.sh            # all of it, with the root and the VPP certificate
 ```
 
 ---

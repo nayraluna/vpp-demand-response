@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # The PKI read with standard OpenSSL commands, each printed before its output.
 #
-#   bash inspect_pki.sh [cert|csr|crl|mtls]     no argument runs all four
+#   bash inspect_pki.sh cert <name>    a certificate and its chain: CA, server, vpp, VEN, operator
+#   bash inspect_pki.sh csr <name>     a certificate request: vpp, VEN
+#   bash inspect_pki.sh crl            the CRL, a valid and a revoked certificate against it
+#   bash inspect_pki.sh mtls           mutual TLS with and without a client certificate
+#   bash inspect_pki.sh                all of it, with the root and the VPP certificate
 #
 # crl and mtls need the services: powershell -ExecutionPolicy Bypass -File .\start_services.ps1
 unset OPENSSL_CONF
@@ -15,14 +19,27 @@ services_up() {
     echo "start the services first: powershell -ExecutionPolicy Bypass -File .\\start_services.ps1"
     return 1
 }
+# A name (CA, vpp, VEN...) or a path, for a given extension. Errors out listing what exists.
+find_file() {
+    local name=$1 ext=$2 f
+    for f in "$name" "certs/$name" "certs/$name.$ext" "backoffice/$name.$ext"; do
+        [ -n "$name" ] && [ -f "$f" ] && { echo "$f"; return; }
+    done
+    local have; have=$(ls certs/*.$ext backoffice/*.$ext 2>/dev/null | xargs -n1 basename | sed "s/\.$ext$//" | tr '\n' ' ')
+    if [ -n "$name" ]; then echo "no .$ext called '$name'. Available: $have" >&2
+    else echo "which one? Available: $have" >&2; fi
+    return 1
+}
 
 cert() {
-    run "openssl x509 -in certs/vpp.crt -noout -text"
-    run "openssl verify -CAfile certs/CA.crt certs/vpp.crt"
+    local c; c=$(find_file "${1:-}" crt) || return 1
+    run "openssl x509 -in $c -noout -text"
+    run "openssl verify -CAfile certs/CA.crt $c"
 }
 
 csr() {
-    run "openssl req -in certs/VEN.csr -noout -text -verify"
+    local r; r=$(find_file "${1:-}" csr) || return 1
+    run "openssl req -in $r -noout -text -verify"
 }
 
 crl() {
@@ -44,4 +61,8 @@ mtls() {
     run "echo | openssl s_client -connect 127.0.0.1:8443 -CAfile certs/CA.crt -brief -noservername"
 }
 
-if [ -n "${1:-}" ]; then "$1"; else cert; csr; crl; mtls; fi
+case "${1:-}" in
+    cert|csr|crl|mtls) "$@" ;;
+    "") cert CA; cert vpp; csr VEN; crl; mtls ;;
+    *) echo "unknown section '$1': cert, csr, crl or mtls"; exit 1 ;;
+esac
