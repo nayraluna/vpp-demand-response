@@ -18,6 +18,7 @@ services_up() {
 
 cert() {
     run "openssl x509 -in certs/CA.crt -noout -text"
+    run "openssl x509 -in certs/VEN.crt -noout -text"
     run "openssl x509 -in certs/vpp.crt -noout -text"
     run "openssl verify -CAfile certs/CA.crt certs/vpp.crt"
 }
@@ -29,12 +30,14 @@ csr() {
 crl() {
     services_up || return
     run "curl -sS http://127.0.0.1:8083/ra/crl -o crl.der"
-    run "openssl crl -in crl.der -inform DER -noout -text -CAfile certs/CA.crt"
+    run "openssl crl -in crl.der -inform DER -noout -text"
     run "openssl crl -in crl.der -inform DER -out crl.pem"
     run "openssl verify -crl_check -CAfile certs/CA.crt -CRLfile crl.pem certs/VEN.crt"
-    # revoked.pem: a certificate the CA revoked, taken from its register.
+    # revoked.pem: the last certificate revoked for keyCompromise, taken from the CA register.
+    printf '\n# revoked.pem = last certificate revoked for keyCompromise, from the CA register (ca/ca.db)\n'
     "$PY" -c "import sqlite3; print(sqlite3.connect('ca/ca.db').execute(\"SELECT certificate FROM issued WHERE reason = 'keyCompromise' ORDER BY revoked_at DESC\").fetchone()[0], end='')" \
         > revoked.pem 2>/dev/null || { echo "no revoked certificate yet: run run_all.ps1 first"; return; }
+    run "openssl x509 -in revoked.pem -noout -subject -serial"
     run "openssl verify -crl_check -CAfile certs/CA.crt -CRLfile crl.pem revoked.pem"
 }
 
