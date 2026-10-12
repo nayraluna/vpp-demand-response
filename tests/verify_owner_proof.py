@@ -65,7 +65,7 @@ def pair_appliance(key, cert_pem: str) -> dict:
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption())
     token = jwt.encode({
-        "vpp_url": VPP, "vpp_mtls_url": MTLS,
+        "vpp_mtls_url": MTLS,
         "cert_vpp": (CERTS / "vpp.crt").read_text(),
     }, key_pem, algorithm="RS256",
         headers={"x5c": [x5c], "typ": "application/pairing+json"})

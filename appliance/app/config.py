@@ -8,7 +8,6 @@ FACTORY_DEFAULTS = {
     "state": 0,          # 0 = pairing mode, 1 = configured
     "max": 120,          # minutes
     "rec": 30,           # minutes
-    "vpp_url": None,
     "vpp_mtls_url": None,
     "owner": None,       # subject of the pairing user
     "owner_serial": None,   # checked against the CRL

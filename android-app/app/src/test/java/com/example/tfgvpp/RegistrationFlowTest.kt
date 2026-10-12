@@ -77,7 +77,7 @@ class RegistrationFlowTest {
         assertTrue("Cert_VPP must chain to the RA", reg.vppCertChainsToRa)
 
         val pairing = PairingClient(caFile.inputStream(), reg)
-        val p = pairing.pair(applianceUrl, vppUrl, mtlsUrl)
+        val p = pairing.pair(applianceUrl, mtlsUrl)
 
         assertEquals("paired", p.status)
         assertEquals("the appliance must record US as its owner", "CN=$cn", p.owner)
@@ -112,7 +112,7 @@ class RegistrationFlowTest {
         assertTrue("session user must be us: $session", session.contains("CN=$cn"))
 
         try {
-            pairing.pair(applianceUrl, vppUrl, mtlsUrl)
+            pairing.pair(applianceUrl, mtlsUrl)
             fail("the appliance accepted a second pairing while configured")
         } catch (e: IllegalStateException) {
             assertTrue("expected HTTP 409, got: ${e.message}",

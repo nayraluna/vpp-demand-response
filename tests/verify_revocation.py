@@ -142,7 +142,7 @@ def onboard(key, cert_pem: str, client) -> str:
     """Pair, bind and declare an open calendar; the appliance registers on its own poll."""
     requests.post(f"{APP}/factory-reset")
     bundle = sign_as(key, cert_pem, {
-        "vpp_url": VPP, "vpp_mtls_url": MTLS,
+        "vpp_mtls_url": MTLS,
         "cert_vpp": (CERTS / "vpp.crt").read_text()}, "application/pairing+json")
     proof = requests.post(f"{APP}/pair", json={"jws": bundle}).json()["owner_proof"]
     ven = requests.post(f"{MTLS}/appliances/owner-proof", json={"owner_proof": proof},

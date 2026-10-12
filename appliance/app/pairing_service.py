@@ -91,7 +91,6 @@ def pair(jws_token: str) -> dict:
     vpp_file.write_text(payload["cert_vpp"])
     cfg.update({
         "state": 1,
-        "vpp_url": payload.get("vpp_url"),
         "vpp_mtls_url": payload.get("vpp_mtls_url"),
         "owner": owner_subject,
         "owner_serial": format(owner.serial_number, "x"),

@@ -56,7 +56,6 @@ class ApplianceRepositoryImpl @Inject constructor(
                 val p = try {
                     client.pair(
                         pairing.applianceUrl,
-                        endpoints.vppUrlForAppliance,
                         endpoints.vppMtlsUrlForAppliance,
                     )
                 } catch (e: IllegalStateException) {

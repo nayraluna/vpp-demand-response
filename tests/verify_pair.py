@@ -114,7 +114,6 @@ def expired_from_ca(cn: str):
 def bundle() -> dict:
     """How to reach the VPP; the appliance reports its own parameters."""
     return {
-        "vpp_url": "https://127.0.0.1:8080",
         "vpp_mtls_url": "https://127.0.0.1:8443",
         "cert_vpp": (CERTS / "vpp.crt").read_text(),
     }
@@ -190,7 +189,7 @@ def main():
     cfg = requests.get(f"{APP}/config").json()
     ok("appliance left pairing mode (state 1)") if cfg["state"] == 1 \
         else die(f"expected state 1, got {cfg['state']}")
-    ok(f"VPP address stored: {cfg['vpp_url']}") if cfg["vpp_url"] else die("no vpp_url")
+    ok(f"VPP mTLS address stored: {cfg['vpp_mtls_url']}") if cfg["vpp_mtls_url"] else die("no vpp_mtls_url")
 
     r = requests.post(f"{APP}/pair", json={"jws": token})
     ok("re-pairing a configured appliance refused (409)") if r.status_code == 409 \

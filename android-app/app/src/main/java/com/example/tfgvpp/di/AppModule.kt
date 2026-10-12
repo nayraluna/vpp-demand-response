@@ -31,7 +31,6 @@ object AppModule {
             raUrl = "https://$host:8081",
             mtlsUrl = "https://$host:8443",
             defaultApplianceUrl = "http://$host:8082",
-            vppUrlForAppliance = "https://$applianceHost:8080",
             vppMtlsUrlForAppliance = "https://$applianceHost:8443",
         )
     }

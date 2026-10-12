@@ -256,11 +256,6 @@ after a successful pair. Factory reset should require a physical action on the
 device or the owner's signature. The poll and status endpoints exist for the
 test suite and should not be part of the production surface.
 
-### The bundle carries an unused bootstrap URL
-The bundle has both `vpp_url` and `vpp_mtls_url`, and the appliance reads only
-the second. Since the appliance holds a factory certificate it never needs an
-unauthenticated endpoint. Keep one URL.
-
 ### OpenADR naming is only partially aligned
 The VEN registration exchange uses the OpenADR 2.0b names (`venName`,
 `oadrProfileName`, `venID`, `registrationID`, `oadrRequestedOadrPollFreq`).
@@ -303,6 +298,8 @@ population of 20 users and 40 appliances.
   07a160c).
 - The revocation list is an RFC 5280 CRL with CRLNumber, AKI, reason codes and
   a distribution point in every leaf (f8cc108).
+- The pairing bundle carries only the VPP's mutual-TLS URL: the appliance never
+  needed the server-authenticated bootstrap endpoint.
 - Root KeyUsage limited to keyCertSign and cRLSign, `notBefore` backdated,
   CSRs with an empty subject or the CA's name refused, the register keeps the
   certificate, its profile and who revoked it, serials accepted as any tool

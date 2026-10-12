@@ -175,7 +175,7 @@ def main():
     record("enroll", enroll_ms)
 
     bundle = sign_as(key, cert_pem, {
-        "vpp_url": VPP, "vpp_mtls_url": MTLS,
+        "vpp_mtls_url": MTLS,
         "cert_vpp": (CERTS / "vpp.crt").read_text()}, "application/pairing+json")
 
     print(f"== phase 1: onboarding, {SAMPLES} samples ==")

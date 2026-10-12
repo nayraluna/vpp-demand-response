@@ -35,7 +35,6 @@ if not LAN:
     )
 
 VPP, MTLS = "https://127.0.0.1:8080", "https://127.0.0.1:8443"
-VPP_FOR_PI = f"https://{LAN}:8080"
 MTLS_FOR_PI = f"https://{LAN}:8443"
 
 sys.path.insert(0, str(ROOT / "backoffice"))
@@ -134,7 +133,7 @@ def main():
     reset_operational_state()
     ukey, ucert, uclient = ra_identity(f"pi-user-{secrets.token_hex(3)}")
     bundle = user_jws(ukey, ucert, {
-        "vpp_url": VPP_FOR_PI, "vpp_mtls_url": MTLS_FOR_PI,
+        "vpp_mtls_url": MTLS_FOR_PI,
         "cert_vpp": (CERTS / "vpp.crt").read_text(),
     })
     r = requests.post(f"{PI}/pair", json={"jws": bundle}, timeout=15)

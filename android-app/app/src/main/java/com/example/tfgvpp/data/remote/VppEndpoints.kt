@@ -5,7 +5,6 @@ data class VppEndpoints(
     val raUrl: String,              // CA, registration authority side (:8081)
     val mtlsUrl: String,            // VPP, mutual TLS (:8443)
     val defaultApplianceUrl: String,// appliance emulated on the PC (:8082); a QR overrides it
-    // The VPP as reached from the appliance, not from the phone.
-    val vppUrlForAppliance: String,
+    // The VPP as reached from the appliance, not from the phone: mutual TLS only.
     val vppMtlsUrlForAppliance: String,
 )

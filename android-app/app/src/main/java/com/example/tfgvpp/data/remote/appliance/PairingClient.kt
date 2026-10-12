@@ -55,15 +55,13 @@ class PairingClient(caInput: InputStream, private val registration: Registration
 
     data class BindResult(val status: String, val ven: String, val owner: String)
 
-    /** The VPP URLs are as reached from the appliance, not from the phone. */
+    /** The VPP URL is as reached from the appliance, not from the phone. */
     fun pair(
         applianceUrl: String,
-        vppUrlForAppliance: String,
         vppMtlsUrlForAppliance: String,
     ): PairResult {
         // Signing the bundle is what tells the appliance, authenticated, who is enrolling it.
         val payload = mapOf(
-            "vpp_url" to vppUrlForAppliance,
             "vpp_mtls_url" to vppMtlsUrlForAppliance,
             "cert_vpp" to registration.vppCertificatePem,
         )
