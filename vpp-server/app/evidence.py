@@ -4,7 +4,7 @@ import jwt
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
-from . import crypto_service, db
+from . import crypto_service, db, revocation
 
 
 class InvalidEvidence(Exception):
@@ -30,6 +30,9 @@ def verify(jws_token: str, submitter_subject: str) -> dict:
         raise InvalidEvidence("appliance certificate not issued by the CA")
     if not crypto_service.within_validity(ven_cert):
         raise InvalidEvidence("appliance certificate expired or not yet valid")
+    # Same subject as the channel is not the same certificate: a superseded one keeps the name.
+    if revocation.is_revoked(ven_cert):
+        raise InvalidEvidence("appliance certificate is revoked")
 
     ven_pub = ven_cert.public_key().public_bytes(
         serialization.Encoding.PEM,

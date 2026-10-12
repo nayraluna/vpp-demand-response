@@ -4,7 +4,7 @@ import jwt
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
-from . import crypto_service
+from . import crypto_service, revocation
 
 SLOT_MINUTES = 30
 SLOTS_PER_DAY = 24 * 60 // SLOT_MINUTES
@@ -55,6 +55,9 @@ def verify_signed(jws_token: str, expected_owner: str) -> dict:
         raise InvalidAvailability("calendar signer not certified by the CA")
     if not crypto_service.within_validity(owner_cert):
         raise InvalidAvailability("calendar signer certificate expired or not yet valid")
+    # Same subject as the channel is not the same certificate: a superseded one keeps the name.
+    if revocation.is_revoked(owner_cert):
+        raise InvalidAvailability("calendar signer certificate is revoked")
     owner_pub = owner_cert.public_key().public_bytes(
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
     try:

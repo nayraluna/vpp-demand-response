@@ -215,6 +215,13 @@ def main():
             else die(f"expected refusal for the superseded owner: {body}")
 
         wclient2 = write_pair("owner2", wkey2, wpem2)
+        stale = sign_as(wkey, wpem, {"slots": {d: "1" * 48 for d in DAYS}, "version": int(time.time() * 1000)},
+                        "application/availability+json")
+        r = requests.post(f"{MTLS}/availability", json={"ven": ven, "jws": stale},
+                          cert=wclient2, verify=CA_FILE)
+        ok(f"a calendar signed with the superseded certificate is refused by the VPP ({r.status_code})") \
+            if r.status_code == 400 and "revoked" in r.text \
+            else die(f"calendar from a superseded certificate accepted: {r.status_code} {r.text}")
         declare(wkey2, wpem2, wclient2, ven)
         act_b = f"act-renewed-{secrets.token_hex(4)}"
         inject_activation(ven, act_b)
@@ -228,6 +235,23 @@ def main():
             else die(f"activation still refused: {refusal}")
         with sqlite3.connect(str(DB_FILE)) as c:
             c.execute("DELETE FROM activations WHERE activation_id IN (?, ?)", (act_a, act_b))
+
+        print("G7: evidence signed with a superseded appliance certificate is refused")
+        vkey, vpem, vcert, _ = ra_identity(f"ven-{secrets.token_hex(3)}")
+        vkey2 = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        r = renew(vkey, vpem, vkey2, vcert.subject)
+        if r.status_code != 200:
+            die(f"appliance renewal refused: {r.status_code} {r.text}")
+        vclient2 = write_pair("ven2", vkey2, r.json()["certificate"])
+        now = datetime.datetime.now(datetime.timezone.utc)
+        proof = sign_as(vkey, vpem, {"activation_id": f"act-{secrets.token_hex(4)}",
+                                     "ven": vcert.subject.rfc4514_string(), "reduction_pct": 100,
+                                     "executed_at": now.isoformat(), "date": now.date().isoformat(),
+                                     "time": now.strftime("%H:%M")}, "application/dr-evidence+json")
+        r = requests.post(f"{MTLS}/evidence", json={"evidence": proof}, cert=vclient2, verify=CA_FILE)
+        ok(f"evidence from the superseded key refused over the renewed channel ({r.status_code})") \
+            if r.status_code == 400 and "revoked" in r.text \
+            else die(f"evidence from a superseded certificate accepted: {r.status_code} {r.text}")
 
         print(f"\nRENEWAL COMPLETE: {passed} checks passed.")
     finally:

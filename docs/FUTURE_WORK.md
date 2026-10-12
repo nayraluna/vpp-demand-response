@@ -307,4 +307,5 @@ population of 20 users and 40 appliances.
   (a000510).
 - The certificate CN is a pseudonym and the DNI stays on the phone, the CRL is
   served over plain HTTP and named so in every distribution point, and the
-  appliance certificate inside an owner proof is checked against the CRL.
+  signer's certificate inside every artefact the VPP accepts (owner proof,
+  calendar, evidence) is checked against the CRL, not only the channel's.

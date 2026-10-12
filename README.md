@@ -48,7 +48,7 @@ The user's key is generated in the Android Keystore and is non-exportable. The a
 
 **The appliance enforces its owner's calendar locally.** Not even the coordinator can activate it outside the declared slots, its maximum curtailment time or its recovery period. Activations arrive by outbound polling only, so nothing connects *into* the home. The appliance trusts only the root installed at the factory next to its signing key.
 
-**Credentials are revoked and renewed.** An operator revokes by serial with a signed request. The CA publishes an RFC 5280 CRL signed with the root key, with a monotonic CRL number and a 24 hour validity, named in every leaf's distribution point. The VPP checks it on every mutual-TLS request and at enrolment, and relays it to the appliance, which verifies it against its factory root, refuses a lower number and stops acting when its copy expires. The CA issues one live certificate per subject. Renewal re-keys under the same subject and supersedes the old certificate in the same act.
+**Credentials are revoked and renewed.** An operator revokes by serial with a signed request. The CA publishes an RFC 5280 CRL signed with the root key, with a monotonic CRL number and a 24 hour validity, named in every leaf's distribution point. The VPP checks it on every mutual-TLS request, at enrolment and on the signer of every artefact it accepts, and relays it to the appliance, which verifies it against its factory root, refuses a lower number and stops acting when its copy expires. The CA issues one live certificate per subject. Renewal re-keys under the same subject and supersedes the old certificate in the same act.
 
 **Identity proof with the Spanish eID.** The app reads the DNIe over NFC through a PACE channel, validates the chain to `AC RAIZ DNIE 2`, and has the chip sign a fresh nonce with the user's PIN, so a copied public certificate cannot pass for a login. The DNI stays on the phone: the platform certificate carries a random pseudonym.
 
@@ -58,7 +58,7 @@ The user's key is generated in the Android Keystore and is non-exportable. The a
 powershell -ExecutionPolicy Bypass -File .\run_all.ps1
 ```
 
-16 gates, 189 checks. Every protocol step runs against its positive *and* its negative cases over the real stack, with real TLS and a real database: certificates outside the chain, invalid signatures, replayed activations, forged capacities, evidence submitted twice, revoked credentials at the mutual-TLS door, a rolled-back revocation list, and a rolled-back calendar planted directly in the row the appliance polls.
+16 gates, 191 checks. Every protocol step runs against its positive *and* its negative cases over the real stack, with real TLS and a real database: certificates outside the chain, invalid signatures, replayed activations, forged capacities, evidence submitted twice, revoked credentials at the mutual-TLS door, a rolled-back revocation list, and a rolled-back calendar planted directly in the row the appliance polls.
 
 `RegistrationFlowTest` drives the app's real protocol clients against the live servers from the JVM. `tests/verify_pi.py` runs a complete DR event against a Raspberry Pi over a real network (11 checks). Registration, QR pairing and DNIe login were completed on a physical phone.
 

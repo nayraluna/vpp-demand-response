@@ -119,6 +119,8 @@ class Handler(BaseHTTPRequestHandler):
             calendar = availability.verify_signed(body.get("jws", ""), user_subject)
         except availability.InvalidAvailability as e:
             return self._json(400, {"error": str(e)})
+        except revocation.Unavailable as e:
+            return self._json(503, {"error": str(e)})
 
         # Same monotonicity the appliance enforces, so a stale declaration never overwrites a newer one.
         current = db.get_availability(ven)
@@ -257,6 +259,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(409, {"error": str(e)})
         except evidence.InvalidEvidence as e:
             return self._json(400, {"error": str(e)})
+        except revocation.Unavailable as e:
+            return self._json(503, {"error": str(e)})
 
         # The signed JWS is kept verbatim: it is the auditable record.
         db.add_evidence(
