@@ -61,8 +61,11 @@ repo root. The emulator needs nothing, because it reaches the services at
 goes over USB, where `installDebug` triggers the `adbReverseVpp` task and the
 app then talks to `127.0.0.1` through `adb reverse` tunnels. Only pairing a
 real appliance needs more, because the app hands it a URL the appliance has to
-reach on its own network: that is the `vpp.lan.host` setting covered in the
-root README.
+reach on its own network: that is the `vpp.lan.host` setting covered in
+[RUNBOOK.md](../RUNBOOK.md), section 6.
+
+The app needs Android 10 or later (`minSdk 29`): it speaks TLS 1.3 only, and
+Android has it from version 10.
 
 ## DNIe login
 

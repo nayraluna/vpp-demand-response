@@ -1,4 +1,6 @@
 import importlib.util
+import socket
+import ssl
 import sys
 from pathlib import Path
 
@@ -128,6 +130,17 @@ def main():
         die("tampered VEN message verified (broken logic)")
     except InvalidSignature:
         ok("tampered VEN message rejected")
+
+    print("G5: every TLS listener refuses a client limited to TLS 1.2")
+    for port in (8080, 8081, 8443):
+        old = ssl.create_default_context(cafile=CA_FILE)
+        old.maximum_version = ssl.TLSVersion.TLSv1_2
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=5) as raw, \
+                    old.wrap_socket(raw, server_hostname="localhost"):
+                die(f":{port} accepted TLS 1.2")
+        except ssl.SSLError as e:
+            ok(f":{port} refuses TLS 1.2 ({e.reason})")
 
     print(f"\nSETUP PHASE COMPLETE: {passed} checks passed, {failed} failed.")
 

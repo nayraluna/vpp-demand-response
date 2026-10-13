@@ -127,11 +127,20 @@ class RegistrationClient(caInput: InputStream) {
     }
 
     companion object {
+        /** TLS 1.3 only. The client key is P-256, so its CertificateVerify is plain ECDSA, not the
+         *  RSA-PSS that some Keymasters failed with when the key was RSA and the app was pinned to 1.2. */
+        private val TLS13: ConnectionSpec = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
+            .tlsVersions(TlsVersion.TLS_1_3)
+            .build()
+
         /** OkHttp client that trusts ONLY the platform CA root (the only trust anchor everywhere). */
         fun buildServerAuthClient(caCertificate: X509Certificate): OkHttpClient {
             val tm = trustManagerFor(caCertificate)
             val ssl = SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), null) }
-            return OkHttpClient.Builder().sslSocketFactory(ssl.socketFactory, tm).build()
+            return OkHttpClient.Builder()
+                .sslSocketFactory(ssl.socketFactory, tm)
+                .connectionSpecs(listOf(TLS13))
+                .build()
         }
 
         fun trustManagerFor(caCertificate: X509Certificate): X509TrustManager {
@@ -152,8 +161,7 @@ class RegistrationClient(caInput: InputStream) {
         }
 
         /** Mutual-TLS client. A key manager, not a PKCS#12 store: a Keystore key is non-exportable and must
-         *  sign in place. Pinned to TLS 1.2: 1.3's RSA-PSS CertificateVerify failed on some Keymasters and
-         *  every validation on real hardware ran over 1.2. */
+         *  sign in place. */
         fun buildMutualTlsClient(
             credential: UserCredential, caCertificate: X509Certificate,
         ): OkHttpClient {
@@ -161,12 +169,9 @@ class RegistrationClient(caInput: InputStream) {
             val km = CredentialKeyManager(credential)
             val ssl = SSLContext.getInstance("TLS")
                 .apply { init(arrayOf(km), arrayOf(tm), null) }
-            val tls12 = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
-                .tlsVersions(TlsVersion.TLS_1_2)
-                .build()
             return OkHttpClient.Builder()
                 .sslSocketFactory(ssl.socketFactory, tm)
-                .connectionSpecs(listOf(tls12))
+                .connectionSpecs(listOf(TLS13))
                 .build()
         }
 

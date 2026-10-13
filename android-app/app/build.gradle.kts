@@ -27,7 +27,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.tfgvpp"
-        minSdk = 26
+        minSdk = 29   // Android 10: the first with TLS 1.3, the only version the app speaks
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"

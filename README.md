@@ -28,7 +28,7 @@ The platform answers both with cryptography instead of surveillance. The user de
 
 ## Security design
 
-One X.509 root, P-256 keys throughout. RSA remains only on the DNIe.
+One X.509 root, P-256 keys throughout, TLS 1.3 only. RSA remains only on the DNIe.
 
 **Identity is certified, not declared.** The appliance's nominal power is in its certificate subject (`OU=P=2000`). An appliance that inflates it at pairing is caught: the value it signs must match the certificate it presents.
 
@@ -58,7 +58,7 @@ The user's key is generated in the Android Keystore and is non-exportable. The a
 powershell -ExecutionPolicy Bypass -File .\run_all.ps1
 ```
 
-16 gates, 191 checks. Every protocol step runs against its positive *and* its negative cases over the real stack, with real TLS and a real database: certificates outside the chain, invalid signatures, replayed activations, forged capacities, evidence submitted twice, revoked credentials at the mutual-TLS door, a rolled-back revocation list, and a rolled-back calendar planted directly in the row the appliance polls.
+16 gates, 194 checks. Every protocol step runs against its positive *and* its negative cases over the real stack, with real TLS and a real database: certificates outside the chain, invalid signatures, replayed activations, forged capacities, evidence submitted twice, revoked credentials at the mutual-TLS door, a client limited to TLS 1.2, a rolled-back revocation list, and a rolled-back calendar planted directly in the row the appliance polls.
 
 `RegistrationFlowTest` drives the app's real protocol clients against the live servers from the JVM. `tests/verify_pi.py` runs a complete DR event against a Raspberry Pi over a real network (11 checks). Registration, QR pairing and DNIe login were completed on a physical phone.
 
