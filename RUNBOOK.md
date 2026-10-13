@@ -87,8 +87,8 @@ Without the services from [step 2](#2-services-for-manual-testing) running, the 
 | # | Do this | Expected |
 |---|---|---|
 | 1 | Install the APK from Android Studio (Run) | The `adbReverseVpp` task creates the USB tunnels by itself |
-| 2 | **Sign in with DNIe** (card, 6 digit CAN, PIN), or *Use a test identity* on the emulator, then **Create account** | Home Screen, no appliances yet |
-| 3 | **Pair appliance**, scanning the QR at `http://127.0.0.1:8082/qr` or pressing *Use development appliance* | owner proof checks, appliance on Home Screen |
+| 2 | **Sign in with DNIe** (card, 6 digit CAN, PIN), or *Use a test identity (no DNIe)* on the emulator, then **Create account** | Home Screen, no appliances yet |
+| 3 | **Add appliance**, scanning the QR at `http://127.0.0.1:8082/qr` or pressing *Use PC appliance* | owner proof checks, appliance on Home Screen |
 | 4 | **Edit availability**, marking at least the current UTC hours, then Save | Availability saved |
 
 Over Wi-Fi instead of USB, put the PC and the phone on the same network and
@@ -223,9 +223,11 @@ calendar, an activation is delivered once, and replayed evidence is refused with
 409 by design.
 
 Everything is measured over loopback, so these exclude network latency and are
-a lower bound. Reference p50 and p95: issuance 20 and 23 ms, enrolment 24 and
-31 ms, pairing 71 and 113 ms, owner proof 31 and 45 ms, availability 92 and
-123 ms, participation read 19 and 24 ms, empty poll 29 and 36 ms.
+a lower bound. Reference p50 and p95 with P-256 keys: issuance 17 and 21 ms,
+enrolment 14 and 15 ms, pairing 7 and 8 ms, owner proof 22 and 29 ms,
+availability 50 and 57 ms, participation read 10 and 14 ms, empty poll 16 and
+19 ms. The thesis figures were taken with RSA-2048 and run roughly twice as
+high, pairing ten times, because the appliance signs its owner proof there.
 
 ---
 

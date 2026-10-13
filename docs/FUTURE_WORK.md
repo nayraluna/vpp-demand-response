@@ -272,11 +272,37 @@ thin adapter.
 `cfg["processed"]` is an append only list. Since every activation carries
 `ends_at`, entries older than that can be pruned.
 
+### The VPP's recovery clock does not match the appliance's
+`_dr_activate` stores `ends_at` as the issue time plus the window length, while
+the appliance stops at the end of the window itself. An activation issued at
+19:36 for 19:00 to 21:00 is recorded as ending at 21:36, so selection keeps the
+appliance in recovery 36 minutes longer than the device is. It errs on the safe
+side. Fix: store the window end on the activation's day (slot_end on today's
+UTC date). Small.
+
+### Participation history follows the appliance, not the ownership
+`/participation` returns the evidence of every appliance the user owns now,
+whoever owned it when the evidence was produced. After a factory reset and a
+new pairing, the new owner sees the previous owner's events and rewards. Fix:
+record the owner on each evidence row when it is accepted, and filter on it.
+Small.
+
 ### Scale is untested
 One physical appliance, with fleet behaviour exercised through a synthetic
 population of 20 users and 40 appliances.
 
 ## Resolved since the thesis
+
+- TLS 1.3 only, in the app and on the three servers, so the app needs Android
+  10 (`minSdk 29`). The app's TLS 1.2 pin existed because an RSA client key had
+  to sign RSA-PSS in TLS 1.3, which some Keymasters failed; the Keystore key is
+  P-256 now. TLS 1.2 had also left :8080 and :8081 offering a CBC suite with
+  HMAC-SHA1 (uvicorn's default `--ssl-ciphers TLSv1`). uvicorn has no minimum
+  version option, so `serve_tls.py` starts those two listeners, and a gate
+  checks that a client limited to TLS 1.2 is refused on every port.
+- Pairing from the emulator handed the PC appliance `10.0.2.2`, an address only
+  the emulator can reach, so the appliance never polled. It now gets
+  `127.0.0.1`, or `vpp.lan.host` for a Pi.
 
 - Revocation and renewal: CA register, `/ra/revoke`, `/ra/crl`, `/ra/renew`,
   checked at the mTLS door, at enrolment and on the appliance, renewal as
