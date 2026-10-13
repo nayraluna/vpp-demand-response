@@ -22,9 +22,10 @@ object AppModule {
             if (Build.PRODUCT.contains("sdk") || Build.FINGERPRINT.contains("generic"))
                 "10.0.2.2"
             else "127.0.0.1"
-        // As seen from the appliance: a Pi on the LAN cannot reach a 127.0.0.1 handed over in the
-        // bundle, so vpp.lan.host from local.properties (also in the SAN) when set.
-        val applianceHost = BuildConfig.VPP_LAN_HOST.ifBlank { host }
+        // As seen from the appliance, not from the phone: the development appliance runs on the PC,
+        // which reaches the VPP on 127.0.0.1 (10.0.2.2 only exists inside the emulator). A Pi on the
+        // LAN needs vpp.lan.host from local.properties, also in the SAN.
+        val applianceHost = BuildConfig.VPP_LAN_HOST.ifBlank { "127.0.0.1" }
 
         return VppEndpoints(
             baseUrl = "https://$host:8080",
