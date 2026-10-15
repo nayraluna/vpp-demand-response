@@ -29,7 +29,10 @@ import java.security.spec.ECGenParameterSpec
 import java.security.KeyStore
 import java.security.Principal
 import java.security.PrivateKey
+import java.security.cert.CertPathValidator
 import java.security.cert.CertificateFactory
+import java.security.cert.PKIXParameters
+import java.security.cert.TrustAnchor
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLEngine
@@ -112,8 +115,7 @@ class RegistrationClient(caInput: InputStream) {
         )
     }
 
-    private fun chainsToRa(cert: X509Certificate): Boolean =
-        try { cert.verify(caCertificate.publicKey); cert.checkValidity(); true } catch (e: Exception) { false }
+    private fun chainsToRa(cert: X509Certificate): Boolean = validatesToRoot(cert, caCertificate)
 
     private fun postJson(url: String, body: Map<String, Any>): Map<String, Any> {
         val req = Request.Builder().url(url)
@@ -132,6 +134,17 @@ class RegistrationClient(caInput: InputStream) {
         private val TLS13: ConnectionSpec = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
             .tlsVersions(TlsVersion.TLS_1_3)
             .build()
+
+        /** PKIX path validation to the platform root, as the app already does for the DNIe: issuer
+         *  name, signature, validity and the standard extension checks. Revocation is not checked yet. */
+        fun validatesToRoot(cert: X509Certificate, root: X509Certificate): Boolean = try {
+            val params = PKIXParameters(setOf(TrustAnchor(root, null))).apply { isRevocationEnabled = false }
+            CertPathValidator.getInstance("PKIX")
+                .validate(CertificateFactory.getInstance("X.509").generateCertPath(listOf(cert)), params)
+            true
+        } catch (e: Exception) {
+            false
+        }
 
         /** OkHttp client that trusts ONLY the platform CA root (the only trust anchor everywhere). */
         fun buildServerAuthClient(caCertificate: X509Certificate): OkHttpClient {
