@@ -3,6 +3,13 @@ import datetime
 from . import availability as av
 
 
+def window_end(day: str, slot_end: int, now: datetime.datetime) -> datetime.datetime:
+    """When a window on `day` ends, in UTC: today if `day` is today, else its next occurrence."""
+    ahead = (av.DAYS.index(day) - now.weekday()) % 7
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight + datetime.timedelta(days=ahead, minutes=slot_end * av.SLOT_MINUTES)
+
+
 def _recovering(appliance: dict, now: datetime.datetime) -> int | None:
     """Minutes still to wait before this appliance may participate again."""
     last_end = appliance.get("last_activation_end")

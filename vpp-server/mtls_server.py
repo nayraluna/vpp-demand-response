@@ -228,7 +228,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(409, {"status": "not-activated", **selection})
 
         now = datetime.datetime.now(datetime.timezone.utc)
-        ends_at = now + datetime.timedelta(minutes=selection["duration_minutes"])
+        # The window's own end, which is when the appliance stops and its recovery starts.
+        ends_at = scheduling.window_end(selection["day"], selection["slot_end"], now)
         issued = []
         for chosen in selection["selected"]:
             activation = {

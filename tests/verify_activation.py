@@ -135,14 +135,24 @@ def open_calendar() -> dict:
     return {day: bitmap for day in av.DAYS}
 
 
-def inject_activation(ven: str, act_id: str, day: str, start: int, end: int):
+def window_end(day: str, end: int) -> datetime.datetime:
+    """The end of a window on `day`: today if it is today, else its next occurrence (UTC)."""
+    now = now_utc()
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight + datetime.timedelta(days=(av.DAYS.index(day) - now.weekday()) % 7,
+                                         minutes=end * av.SLOT_MINUTES)
+
+
+def inject_activation(ven: str, act_id: str, day: str, start: int, end: int,
+                      ends_at: datetime.datetime | None = None):
     """Write an activation straight into the VPP's queue (adversarial cases)."""
+    ends_at = ends_at or window_end(day, end)
     with sqlite3.connect(str(DB_FILE)) as c:
         c.execute(
             """INSERT INTO activations(activation_id, ven_subject, day,
                    slot_start, slot_end, action, issued_at, ends_at, delivered_at)
-               VALUES(?,?,?,?,?,'reduce','2026-01-01T00:00:00+00:00',NULL,NULL)""",
-            (act_id, ven, day, start, end))
+               VALUES(?,?,?,?,?,'reduce','2026-01-01T00:00:00+00:00',?,NULL)""",
+            (act_id, ven, day, start, end, ends_at.isoformat()))
 
 
 def main():
@@ -188,13 +198,17 @@ def main():
         act_id = issued[0]["activation_id"]
         ok(f"activation {act_id} issued for {r.json()['interval']}")
         row = sqlite3.connect(str(DB_FILE)).execute(
-            "SELECT delivered_at FROM activations WHERE activation_id=?",
+            "SELECT delivered_at, ends_at FROM activations WHERE activation_id=?",
             (act_id,)).fetchone()
         ok(f"the identifier carries 128 random bits ({act_id[:16]}...)") \
             if act_id.startswith("act-") and len(act_id) == 4 + 32 \
             else die(f"unexpected identifier {act_id}")
         ok("not delivered yet (the appliance must come and fetch it)") \
             if row[0] is None else die("marked delivered before polling")
+        expected = window_end(window["day"], window["slot_end"])
+        ok(f"it ends when its window does ({row[1][11:16]} UTC), which is when recovery starts") \
+            if datetime.datetime.fromisoformat(row[1]) == expected \
+            else die(f"ends_at {row[1]}, expected the window end {expected.isoformat()}")
         after = sqlite3.connect(str(DB_FILE)).execute(
             "SELECT COUNT(*) FROM activations").fetchone()[0]
         ok("the infeasible request left no activation behind") \
