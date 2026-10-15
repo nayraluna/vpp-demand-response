@@ -125,24 +125,12 @@ queries. The CRL is served over plain HTTP on :8083, as distribution points
 are, since it is checked by its signature. The Android app verifies the appliance and VPP certificates against
 the root but never fetches the CRL. Small for the app, medium for OCSP.
 
-### The app validates the platform chain with a raw signature check
-`cert.verify(root); checkValidity()` in `RegistrationClient`, `SessionManager`
-and `PairingClient`, while the DNIe gets `CertPathValidator`. No issuer profile
-check, no revocation. Fix: the same PKIX call for both. Small.
-
 ### DNIe validation gaps
 `isRevocationEnabled = false`, no DNIe policy OIDs as initial policies, the DNI
 taken from the RFC 2253 string by regex instead of the `serialNumber` RDN. The
 lenient PKCS#1 verifier runs only after strict JCA verification fails, keeps
 padding, separator and hash strict, and tolerates only the DigestInfo OID
 prefix that renewed cards emit. Medium for OCSP, small for the rest.
-
-### The owner proof signature is not kept
-`_owner_proof` verifies the appliance signed proof and stores only the parsed
-relation (VEN, owner, P, max, rec). The evidence, by contrast, is stored as the
-verbatim JWS. If the ownership relation in the database is questioned, there
-is nothing signed by the appliance to show. Fix: store the proof JWS with the
-appliance row. Small.
 
 ### Evidence is verified once and has no long-term validation data
 The JWS that drives a payment is verified at submission and kept verbatim. No
@@ -268,34 +256,28 @@ calendar has no counterpart. Renaming the fields and wrapping the poll as
 `oadrDistributeEvent` would let a standard VEN library parse the events with a
 thin adapter.
 
-### Appliance replay state grows without bound
-`cfg["processed"]` is an append only list. Since every activation carries
-`ends_at`, entries older than that can be pruned.
-
-### The VPP's recovery clock does not match the appliance's
-`_dr_activate` stores `ends_at` as the issue time plus the window length, while
-the appliance stops at the end of the window itself. An activation issued at
-19:36 for 19:00 to 21:00 is recorded as ending at 21:36, so selection keeps the
-appliance in recovery 36 minutes longer than the device is. It errs on the safe
-side. Fix: store the window end on the activation's day (slot_end on today's
-UTC date). Small.
-
-### Participation history follows the appliance, not the ownership
-`/participation` returns the evidence of every appliance the user owns now,
-whoever owned it when the evidence was produced. After a factory reset and a
-new pairing, the new owner sees the previous owner's events and rewards. Fix:
-record the owner on each evidence row when it is accepted, and filter on it.
-Small.
-
 ### Scale is untested
 One physical appliance, with fleet behaviour exercised through a synthetic
 population of 20 users and 40 appliances.
 
 ## Resolved since the thesis
 
+- The VPP records an activation as ending when its window does, so its recovery
+  clock and the appliance's start at the same moment.
+- Evidence records who owned the appliance when it was accepted, and the
+  participation history filters on that, so a new owner does not inherit the
+  previous owner's events and rewards.
+- The signed owner proof is stored with the binding it established.
+- The app validates the platform chain with PKIX (`CertPathValidator`), as it
+  already did for the DNIe: issuer name, signature, validity and extensions.
+- The appliance refuses an activation past its absolute expiry and forgets the
+  ids of expired ones, so its replay list no longer grows without bound.
+- The gates run on P-256 like the platform, with one deliberate RSA-2048 case
+  that renews onto P-256.
+
 - TLS 1.3 only, in the app and on the three servers, so the app needs Android
   10 (`minSdk 29`). The app's TLS 1.2 pin existed because an RSA client key had
-  to sign RSA-PSS in TLS 1.3, which some Keymasters failed; the Keystore key is
+  to sign RSA-PSS in TLS 1.3, which some Keymasters failed. The Keystore key is
   P-256 now. TLS 1.2 had also left :8080 and :8081 offering a CBC suite with
   HMAC-SHA1 (uvicorn's default `--ssl-ciphers TLSv1`). uvicorn has no minimum
   version option, so `serve_tls.py` starts those two listeners, and a gate
