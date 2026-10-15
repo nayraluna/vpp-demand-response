@@ -178,8 +178,10 @@ def inject_activation(ven: str, act_id: str) -> None:
         c.execute(
             """INSERT INTO activations(activation_id, ven_subject, day, slot_start, slot_end,
                    action, issued_at, ends_at, delivered_at)
-               VALUES(?,?,?,?,?,'reduce',?,NULL,NULL)""",
-            (act_id, ven, DAYS[now.weekday()], slot, min(slot + 1, 48), now.isoformat()))
+               VALUES(?,?,?,?,?,'reduce',?,?,NULL)""",
+            (act_id, ven, DAYS[now.weekday()], slot, min(slot + 1, 48), now.isoformat(),
+             (now.replace(hour=0, minute=0, second=0, microsecond=0)
+              + datetime.timedelta(minutes=30 * min(slot + 1, 48))).isoformat()))
 
 
 def forged_crl(number: int) -> str:

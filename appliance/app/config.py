@@ -19,7 +19,7 @@ FACTORY_DEFAULTS = {
     "crl_number": 0,            # monotonic
     "crl_next_update": None,    # list expiry
     "crl_revoked": [],          # serials
-    "processed": [],            # activation ids seen, replay protection
+    "processed": {},            # activation id -> its expiry, replay protection
     "last_activation": None,
     "history": [],              # executed, pending evidence
     "submitted": [],            # evidence accepted by the VPP

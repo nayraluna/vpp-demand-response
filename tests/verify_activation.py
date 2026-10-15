@@ -279,6 +279,22 @@ def main():
         ok("a non-VEN identity is refused (403)") if r.status_code == 403 \
             else die(f"expected 403, got {r.status_code}")
 
+        print("G9: an expired activation is refused, and its id is then forgotten")
+        # A weekday window repeats every week: only the absolute expiry refuses a replay a
+        # week later, and once past it the id no longer needs to be remembered.
+        inject_activation(ven, "act-expired", window["day"], window["slot_start"],
+                          window["slot_end"], ends_at=now_utc() - datetime.timedelta(minutes=1))
+        body = requests.post(f"{APP}/poll").json()
+        refused = {x["activation_id"]: x["reason"] for x in body["refused"]}
+        ok(f"refused: {refused.get('act-expired')}") \
+            if "expired" in refused.get("act-expired", "") \
+            else die(f"expired activation not refused: {body}")
+        requests.post(f"{APP}/poll")
+        processed = requests.get(f"{APP}/config").json()["processed"]
+        ok(f"pruned from the replay list, which keeps {len(processed)} live id(s)") \
+            if "act-expired" not in processed and act_id in processed \
+            else die(f"replay list not pruned as expected: {processed}")
+
         print(f"\nACTIVATION (OPERATIONAL 3) COMPLETE: {passed} checks passed.")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

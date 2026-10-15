@@ -170,6 +170,13 @@ def _check(activation: dict, cfg: dict, now: datetime.datetime) -> str | None:
     if now_slot >= end:
         return (f"activation window has already elapsed "
                 f"(ended at {_slot_label(end)} UTC)")
+    # A weekday window repeats every week, so the absolute expiry is what refuses an old
+    # activation replayed on the same weekday, and what lets its id be forgotten.
+    expires = activation.get("ends_at")
+    if not expires:
+        return "activation carries no expiry"
+    if now >= datetime.datetime.fromisoformat(expires):
+        return f"activation expired at {expires}"
 
     duration = (end - start) * SLOT_MINUTES
     if duration > cfg["max"]:
@@ -181,6 +188,14 @@ def _check(activation: dict, cfg: dict, now: datetime.datetime) -> str | None:
         if elapsed < cfg["rec"]:
             return f"still recovering ({int(cfg['rec'] - elapsed)} min left)"
     return None
+
+
+def _prune_processed(processed, now: datetime.datetime) -> dict:
+    """Forget the ids whose activation has expired: _check refuses them anyway."""
+    if isinstance(processed, list):
+        return {}  # the old list form held no expiry, and every entry in it is long expired
+    return {aid: expires for aid, expires in (processed or {}).items()
+            if datetime.datetime.fromisoformat(expires) > now}
 
 
 def _ven_identity() -> tuple[str, str]:
@@ -243,11 +258,12 @@ def _poll_and_process() -> dict:
     activations = body.get("activations", [])
 
     now = datetime.datetime.now(datetime.timezone.utc)
+    cfg["processed"] = _prune_processed(cfg.get("processed"), now)
     executed, refused = [], []
     for activation in activations:
         reason = _check(activation, cfg, now)
-        # Marked processed even when refused: never accepted twice.
-        cfg["processed"].append(activation["activation_id"])
+        # Marked processed even when refused: never accepted twice while it can still be valid.
+        cfg["processed"][activation["activation_id"]] = activation.get("ends_at") or now.isoformat()
         if reason:
             refused.append({"activation_id": activation["activation_id"],
                             "reason": reason})
