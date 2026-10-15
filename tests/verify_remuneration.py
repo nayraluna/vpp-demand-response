@@ -192,6 +192,17 @@ def main():
             if r.json()["count"] == 0 and r.json()["total_reward_eur"] == 0 \
             else die(f"leaked another user's participation: {r.json()}")
 
+        print("G6: a new owner of the appliance does not inherit what the previous one earned")
+        nkey, npem, nclient = ra_identity(f"user-{secrets.token_hex(3)}")
+        onboard(nkey, npem, nclient, full_calendar())
+        r = requests.get(f"{MTLS}/participation", cert=nclient, verify=CA_FILE)
+        ok("the new owner starts with no participations") \
+            if r.json()["count"] == 0 else die(f"new owner sees the old history: {r.json()}")
+        r = requests.get(f"{MTLS}/participation", cert=uclient, verify=CA_FILE)
+        ok(f"the previous owner keeps theirs ({r.json()['total_reward_eur']} EUR)") \
+            if r.json()["count"] == 1 and r.json()["total_reward_eur"] == 0.3 \
+            else die(f"previous owner lost the history: {r.json()}")
+
         print(f"\nREMUNERATION (OPERATIONAL 5) COMPLETE: {passed} checks passed.")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

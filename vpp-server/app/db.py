@@ -42,7 +42,7 @@ def initialize() -> None:
                    profile         TEXT,
                    registered_at   TEXT NOT NULL)"""
         )
-        # The owner proof signature is verified on arrival and not stored; only the binding is.
+        # The signed owner proof is kept beside the binding it established.
         c.execute(
             """CREATE TABLE IF NOT EXISTS appliances(
                    ven_subject   TEXT PRIMARY KEY,
@@ -75,6 +75,14 @@ def initialize() -> None:
                 c.execute(f"ALTER TABLE availability ADD COLUMN {column} {decl}")
             except sqlite3.OperationalError:
                 pass
+        for table, column in (("appliances", "owner_proof"), ("evidence", "owner")):
+            try:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+            except sqlite3.OperationalError:
+                pass
+        # Evidence from before the owner was recorded goes to whoever owned the appliance then.
+        c.execute("UPDATE evidence SET owner = (SELECT owner FROM appliances a"
+                  " WHERE a.ven_subject = evidence.ven_subject) WHERE owner IS NULL")
         # Last fetched CRL (base64 DER), relayed verbatim to the appliance in the poll response.
         c.execute(
             """CREATE TABLE IF NOT EXISTS crl(
@@ -136,14 +144,14 @@ def get_appliance(ven_subject: str) -> dict | None:
 
 def add_appliance(ven_subject: str, owner: str, cert_pem: str,
                   nominal_power: int, max_curtail: int, recovery: int,
-                  bound_at: str) -> None:
+                  bound_at: str, owner_proof: str | None = None) -> None:
     with _conn() as c:
         c.execute(
             """INSERT OR REPLACE INTO appliances(ven_subject, owner, cert_pem,
-                   nominal_power, max_curtail, recovery, bound_at)
-               VALUES(?,?,?,?,?,?,?)""",
+                   nominal_power, max_curtail, recovery, bound_at, owner_proof)
+               VALUES(?,?,?,?,?,?,?,?)""",
             (ven_subject, owner, cert_pem, nominal_power, max_curtail, recovery,
-             bound_at),
+             bound_at, owner_proof),
         )
 
 
@@ -220,12 +228,12 @@ def get_evidence(activation_id: str) -> dict | None:
 
 
 def add_evidence(activation_id: str, ven_subject: str, executed_at: str,
-                 reduction_pct: int, jws: str, verified_at: str) -> None:
+                 reduction_pct: int, jws: str, verified_at: str, owner: str | None) -> None:
     with _conn() as c:
         c.execute(
             """INSERT INTO evidence(activation_id, ven_subject, executed_at,
-                   reduction_pct, jws, verified_at) VALUES(?,?,?,?,?,?)""",
-            (activation_id, ven_subject, executed_at, reduction_pct, jws, verified_at),
+                   reduction_pct, jws, verified_at, owner) VALUES(?,?,?,?,?,?,?)""",
+            (activation_id, ven_subject, executed_at, reduction_pct, jws, verified_at, owner),
         )
 
 
@@ -238,7 +246,7 @@ def evidence_for_owner(owner: str) -> list[dict]:
                FROM evidence e
                JOIN appliances a ON a.ven_subject = e.ven_subject
                JOIN activations c ON c.activation_id = e.activation_id
-               WHERE a.owner = ?
+               WHERE e.owner = ?
                ORDER BY e.executed_at DESC""",
             (owner,),
         ).fetchall()

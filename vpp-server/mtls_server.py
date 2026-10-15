@@ -156,11 +156,12 @@ class Handler(BaseHTTPRequestHandler):
         except revocation.Unavailable as e:
             return self._json(503, {"error": str(e)})
 
-        # Parameters come from the verified payload; the proof signature itself is not stored.
+        # Parameters come from the verified payload, and the signed proof is kept beside them.
         db.add_appliance(
             bound["ven_subject"], bound["owner"], bound["cert_pem"],
             bound["nominal_power"], bound["max_curtail"], bound["recovery"],
             datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            owner_proof=body.get("owner_proof"),
         )
         return self._json(200, {
             "status": "bound",
@@ -263,12 +264,15 @@ class Handler(BaseHTTPRequestHandler):
         except revocation.Unavailable as e:
             return self._json(503, {"error": str(e)})
 
-        # The signed JWS is kept verbatim: it is the auditable record.
+        # The signed JWS is kept verbatim: it is the auditable record. The reward belongs to
+        # whoever owns the appliance now, not to whoever owns it when the history is read.
+        appliance = db.get_appliance(verified["ven_subject"])
         db.add_evidence(
             verified["activation_id"], verified["ven_subject"],
             verified["executed_at"], verified["reduction_pct"],
             body["evidence"],
             datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            owner=appliance["owner"] if appliance else None,
         )
         return self._json(200, {"status": "verified", **verified})
 

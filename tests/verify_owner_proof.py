@@ -122,6 +122,13 @@ def main():
             if row[0] == user_subject else die(f"stored owner {row[0]}")
         ok("appliance certificate stored (verifies its future messages)") \
             if "BEGIN CERTIFICATE" in row[4] else die("certificate not stored")
+        stored = sqlite3.connect(str(DB_FILE)).execute(
+            "SELECT owner_proof FROM appliances WHERE ven_subject=?", (body["ven"],)).fetchone()[0]
+        ven_cert = x509.load_pem_x509_certificate(row[4].encode())
+        claims = jwt.decode(stored or "", ven_cert.public_key(), algorithms=["RS256", "ES256"])
+        ok("the signed owner proof is kept and still verifies against the appliance certificate") \
+            if stored == proof and claims.get("owner") == user_subject \
+            else die("owner proof not stored as received")
 
         print("G3: a different user cannot claim the appliance")
         _k2, _c2, other = enrolled_user(f"user-{secrets.token_hex(3)}")
