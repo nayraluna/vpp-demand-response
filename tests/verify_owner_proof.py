@@ -10,7 +10,7 @@ import jwt
 import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,7 +37,7 @@ def die(msg):
 
 
 def enrolled_user(name: str):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     csr = (x509.CertificateSigningRequestBuilder()
            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)]))
            .sign(key, hashes.SHA256()))
@@ -67,7 +67,7 @@ def pair_appliance(key, cert_pem: str) -> dict:
     token = jwt.encode({
         "vpp_mtls_url": MTLS,
         "cert_vpp": (CERTS / "vpp.crt").read_text(),
-    }, key_pem, algorithm="RS256",
+    }, key_pem, algorithm="ES256",
         headers={"x5c": [x5c], "typ": "application/pairing+json"})
     r = requests.post(f"{APP}/pair", json={"jws": token})
     if not r.ok:

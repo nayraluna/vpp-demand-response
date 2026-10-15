@@ -12,7 +12,7 @@ import jwt
 import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -42,7 +42,7 @@ def die(msg):
 
 
 def enrolled_user(name: str):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     csr = (x509.CertificateSigningRequestBuilder()
            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)]))
            .sign(key, hashes.SHA256()))
@@ -71,7 +71,7 @@ def bind_appliance(key, cert_pem: str, client) -> str:
         serialization.NoEncryption())
     token = jwt.encode({"vpp_mtls_url": MTLS,
                         "cert_vpp": (CERTS / "vpp.crt").read_text()},
-                       key_pem, algorithm="RS256",
+                       key_pem, algorithm="ES256",
                        headers={"x5c": [x5c], "typ": "application/pairing+json"})
     proof = requests.post(f"{APP}/pair", json={"jws": token}).json()["owner_proof"]
     r = requests.post(f"{MTLS}/appliances/owner-proof", json={"owner_proof": proof},
@@ -99,7 +99,7 @@ def sign_calendar(key, cert_pem: str, slots: dict, version: int) -> str:
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption())
     return jwt.encode({"slots": slots, "version": version}, key_pem,
-                      algorithm="RS256",
+                      algorithm="ES256",
                       headers={"x5c": [x5c], "typ": "application/availability+json"})
 
 
@@ -224,7 +224,7 @@ def main():
         # A self-signed certificate with the owner's exact subject and a newer version:
         # only the chain check stands between this and adoption.
         owner_subject = x509.load_pem_x509_certificate(ucert.encode()).subject
-        fkey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        fkey = ec.generate_private_key(ec.SECP256R1())
         now = datetime.datetime.now(datetime.timezone.utc)
         forged_cert = (x509.CertificateBuilder()
                        .subject_name(owner_subject)

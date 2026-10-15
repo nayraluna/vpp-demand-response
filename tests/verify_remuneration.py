@@ -12,7 +12,7 @@ import jwt
 import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -54,7 +54,7 @@ def reset_operational_state():
 
 
 def ra_identity(name: str, org_unit: str | None = None):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     attrs = [x509.NameAttribute(NameOID.COMMON_NAME, name)]
     if org_unit:
         attrs.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, org_unit))
@@ -81,7 +81,7 @@ def sign_as(key, cert_pem: str, payload: dict, typ: str) -> str:
     key_pem = key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption())
-    return jwt.encode(payload, key_pem, algorithm="RS256",
+    return jwt.encode(payload, key_pem, algorithm="ES256",
                       headers={"x5c": [x5c], "typ": typ})
 
 

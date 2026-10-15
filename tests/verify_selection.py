@@ -11,7 +11,7 @@ import jwt
 import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -121,7 +121,7 @@ def reset_operational_state():
 
 
 def ra_identity(name: str, org_unit: str | None = None):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     attrs = [x509.NameAttribute(NameOID.COMMON_NAME, name)]
     if org_unit:
         attrs.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, org_unit))
@@ -151,7 +151,7 @@ def bind_and_declare(key, cert_pem, client, calendar) -> str:
         serialization.NoEncryption())
     token = jwt.encode({"vpp_mtls_url": MTLS,
                         "cert_vpp": (CERTS / "vpp.crt").read_text()},
-                       key_pem, algorithm="RS256",
+                       key_pem, algorithm="ES256",
                        headers={"x5c": [x5c], "typ": "application/pairing+json"})
     proof = requests.post(f"{APP}/pair", json={"jws": token}).json()["owner_proof"]
     ven = requests.post(f"{MTLS}/appliances/owner-proof", json={"owner_proof": proof},
@@ -161,7 +161,7 @@ def bind_and_declare(key, cert_pem, client, calendar) -> str:
         json={"ven": ven,
               "jws": jwt.encode({"slots": calendar,
                                  "version": int(time.time() * 1000)},
-                                key_pem, algorithm="RS256",
+                                key_pem, algorithm="ES256",
                                 headers={"x5c": [x5c],
                                          "typ": "application/availability+json"})},
         cert=client, verify=CA_FILE)

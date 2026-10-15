@@ -12,7 +12,7 @@ import jwt
 import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -56,7 +56,7 @@ def csr_for(key, subject: x509.Name) -> str:
 
 
 def ra_identity(cn: str):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
     r = requests.post(f"{CA}/ra/issue", json={"csr": csr_for(key, subject)}, verify=CA_FILE)
     if not r.ok:
@@ -72,7 +72,8 @@ def sign_as(key, cert_pem: str, payload: dict, typ: str) -> str:
     x5c = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode()
     key_pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                                 serialization.NoEncryption())
-    return jwt.encode(payload, key_pem, algorithm="RS256", headers={"x5c": [x5c], "typ": typ})
+    alg = "RS256" if isinstance(key, rsa.RSAPrivateKey) else "ES256"
+    return jwt.encode(payload, key_pem, algorithm=alg, headers={"x5c": [x5c], "typ": typ})
 
 
 def renew(key, cert_pem: str, new_key, subject: x509.Name):
@@ -145,7 +146,7 @@ def main():
         r = requests.get(f"{MTLS}/session", cert=client, verify=CA_FILE)
         if r.status_code != 200:
             die(f"fresh user cannot authenticate: {r.status_code} {r.text}")
-        new_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        new_key = ec.generate_private_key(ec.SECP256R1())
         r = renew(key, pem, new_key, cert.subject)
         body = r.json()
         if r.status_code != 200:
@@ -179,13 +180,13 @@ def main():
         print("G4: renewal cannot change who you are")
         other = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "someone-else"),
                            x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "role=operator")])
-        r = renew(new_key, new_pem, rsa.generate_private_key(public_exponent=65537, key_size=2048), other)
+        r = renew(new_key, new_pem, ec.generate_private_key(ec.SECP256R1()), other)
         ok(f"a CSR with another subject is refused ({r.status_code}: {r.json()['detail']})") \
             if r.status_code == 400 and "subject" in r.json()["detail"] \
             else die(f"expected 400, got {r.status_code} {r.text}")
 
         print("G5: a revoked credential cannot renew itself")
-        r = renew(key, pem, rsa.generate_private_key(public_exponent=65537, key_size=2048), cert.subject)
+        r = renew(key, pem, ec.generate_private_key(ec.SECP256R1()), cert.subject)
         ok(f"the superseded certificate is refused ({r.status_code}: {r.json()['detail']})") \
             if r.status_code == 400 and "revoked" in r.json()["detail"] \
             else die(f"expected 400, got {r.status_code} {r.text}")
@@ -199,7 +200,7 @@ def main():
         ok(f"appliance bound to the owner's certificate {wserial[:12]}...") \
             if status["owner_serial"] == wserial else die(f"owner_serial is {status['owner_serial']}")
 
-        wkey2 = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        wkey2 = ec.generate_private_key(ec.SECP256R1())
         r = renew(wkey, wpem, wkey2, wcert.subject)
         if r.status_code != 200:
             die(f"owner renewal refused: {r.status_code} {r.text}")
@@ -238,7 +239,7 @@ def main():
 
         print("G7: evidence signed with a superseded appliance certificate is refused")
         vkey, vpem, vcert, _ = ra_identity(f"ven-{secrets.token_hex(3)}")
-        vkey2 = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        vkey2 = ec.generate_private_key(ec.SECP256R1())
         r = renew(vkey, vpem, vkey2, vcert.subject)
         if r.status_code != 200:
             die(f"appliance renewal refused: {r.status_code} {r.text}")
@@ -252,6 +253,22 @@ def main():
         ok(f"evidence from the superseded key refused over the renewed channel ({r.status_code})") \
             if r.status_code == 400 and "revoked" in r.text \
             else die(f"evidence from a superseded certificate accepted: {r.status_code} {r.text}")
+
+        print("G8: an RSA-2048 holder renews onto a P-256 key")
+        # The one deliberate RSA case: the platform runs on P-256, and the verifiers still
+        # accept an RSA certificate and its RS256 request, which is the migration path.
+        rkey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        rsubject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"rsa-{secrets.token_hex(3)}")])
+        r = requests.post(f"{CA}/ra/issue", json={"csr": csr_for(rkey, rsubject)}, verify=CA_FILE)
+        if not r.ok:
+            die(f"RSA key not certified: {r.status_code} {r.text}")
+        rpem = r.json()["certificate"]
+        r = renew(rkey, rpem, ec.generate_private_key(ec.SECP256R1()), rsubject)
+        new_key = x509.load_pem_x509_certificate(r.json()["certificate"].encode()).public_key() \
+            if r.status_code == 200 else None
+        ok("RS256 renewal request accepted, new certificate on P-256") \
+            if isinstance(new_key, ec.EllipticCurvePublicKey) \
+            else die(f"RSA to P-256 renewal failed: {r.status_code} {r.text}")
 
         print(f"\nRENEWAL COMPLETE: {passed} checks passed.")
     finally:

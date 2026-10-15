@@ -7,7 +7,6 @@ import jwt
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import padding
 
 ROOT = Path(__file__).resolve().parent.parent
 CERTS = ROOT / "certs"

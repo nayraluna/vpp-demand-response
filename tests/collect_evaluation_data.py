@@ -16,7 +16,7 @@ import jwt
 import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -100,7 +100,7 @@ def reset_operational_state():
 
 
 def ra_identity(name):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     csr = (x509.CertificateSigningRequestBuilder()
            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)]))
            .sign(key, hashes.SHA256()))
@@ -127,7 +127,7 @@ def sign_as(key, cert_pem, payload, typ):
     key_pem = key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption())
-    return jwt.encode(payload, key_pem, algorithm="RS256",
+    return jwt.encode(payload, key_pem, algorithm="ES256",
                       headers={"x5c": [x5c], "typ": typ})
 
 
@@ -154,7 +154,7 @@ def main():
     print(f"== phase 0b: issuance and enrolment, {SAMPLES} samples ==")
     issue_ms, enroll_ms = [], []
     for i in range(WARMUP + SAMPLES):
-        throwaway = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        throwaway = ec.generate_private_key(ec.SECP256R1())
         csr = (x509.CertificateSigningRequestBuilder()
                .subject_name(x509.Name([x509.NameAttribute(
                    NameOID.COMMON_NAME, f"eval-perf-{run}-{i:02d}")]))

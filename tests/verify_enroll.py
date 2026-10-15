@@ -7,7 +7,7 @@ import requests
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -38,7 +38,7 @@ def chains_to_ca(cert, ca) -> bool:
 
 
 def ra_issued_user_cert(cn: str):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     csr = (
         x509.CertificateSigningRequestBuilder()
         .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)]))
@@ -52,7 +52,7 @@ def ra_issued_user_cert(cn: str):
 
 
 def self_signed(cn: str) -> str:
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
     now = datetime.datetime.now(datetime.timezone.utc)
     cert = (
@@ -71,7 +71,7 @@ def signed_by_ca(cn: str, days_ago: int = 0):
     """Minted with the CA key: fixtures the CA itself would refuse to issue."""
     ca = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
     ca_key = serialization.load_pem_private_key((Path(CA_FILE).parent / "CA.key").read_bytes(), None)
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     now = datetime.datetime.now(datetime.timezone.utc)
     cert = (
         x509.CertificateBuilder()

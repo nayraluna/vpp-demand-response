@@ -9,7 +9,7 @@ import requests
 from requests.exceptions import ConnectionError, SSLError
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -44,7 +44,7 @@ def write_pair(name: str, key, cert_pem: str):
 
 
 def ra_cert(cn: str):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     csr = (x509.CertificateSigningRequestBuilder()
            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)]))
            .sign(key, hashes.SHA256()))
@@ -57,7 +57,7 @@ def ra_cert(cn: str):
 
 
 def self_signed(cn: str):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
     now = datetime.datetime.now(datetime.timezone.utc)
     cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)

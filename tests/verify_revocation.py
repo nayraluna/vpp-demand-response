@@ -13,7 +13,7 @@ import jwt
 import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -54,7 +54,7 @@ def write_pair(name: str, key, cert_pem: str):
 
 
 def ra_identity(cn: str, role: str | None = None):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     attrs = [x509.NameAttribute(NameOID.COMMON_NAME, cn)]
     if role:
         attrs.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, f"role={role}"))
@@ -71,7 +71,7 @@ def ra_identity(cn: str, role: str | None = None):
 
 
 def self_signed(cn: str, role: str):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn),
                       x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, f"role={role}")])
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -87,7 +87,7 @@ def sign_as(key, cert_pem: str, payload: dict, typ: str) -> str:
     x5c = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode()
     key_pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                                 serialization.NoEncryption())
-    return jwt.encode(payload, key_pem, algorithm="RS256", headers={"x5c": [x5c], "typ": typ})
+    return jwt.encode(payload, key_pem, algorithm="ES256", headers={"x5c": [x5c], "typ": typ})
 
 
 def revoke(key, cert_pem: str, serial: str, reason="keyCompromise"):
@@ -184,7 +184,7 @@ def inject_activation(ven: str, act_id: str) -> None:
 
 def forged_crl(number: int) -> str:
     """A list signed by a self-made key under the CA's own name: valid signature, wrong key."""
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     crl = make_crl(key, root_cert().subject, number,
                    datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1))
     return base64.b64encode(crl.public_bytes(serialization.Encoding.DER)).decode()
@@ -364,7 +364,7 @@ def main():
         sys.path.insert(0, str(ROOT / "vpp-server"))
         from app import revocation  # noqa: E402
         revocation.CRL_URL, revocation.MAX_AGE = "http://127.0.0.1:1/ra/crl", 0
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        key = ec.generate_private_key(ec.SECP256R1())
         now = datetime.datetime.now(datetime.timezone.utc)
         revocation._crl = make_crl(key, root_cert().subject, 1, now + datetime.timedelta(hours=1))
         ok("a list still within nextUpdate is served while the CA is down") \
@@ -381,7 +381,7 @@ def main():
         # The user forwards the proof over their own channel, so the appliance never meets the door check.
         hkey, hpem, hcert, _ = ra_identity(f"holder-{secrets.token_hex(3)}")
         requests.post(f"{VPP}/enroll", json={"certificate": hpem}, verify=CA_FILE)
-        akey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        akey = ec.generate_private_key(ec.SECP256R1())
         aname = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"ven-{secrets.token_hex(3)}"),
                            x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "P=1500"),
                            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Appliances")])

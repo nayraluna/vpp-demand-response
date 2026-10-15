@@ -6,7 +6,7 @@ import requests
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -51,7 +51,7 @@ def main():
         x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Appliances"),
         x509.NameAttribute(NameOID.COUNTRY_NAME, "ES"),
     ])
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     csr = (
         x509.CertificateSigningRequestBuilder()
         .subject_name(subject)
@@ -89,9 +89,9 @@ def main():
 
     print("G3: the issued certificate really certifies the entity's key")
     msg = f"{cn}|proof-of-possession".encode()
-    sig = key.sign(msg, padding.PKCS1v15(), hashes.SHA256())
+    sig = key.sign(msg, ec.ECDSA(hashes.SHA256()))
     try:
-        cert.public_key().verify(sig, msg, padding.PKCS1v15(), hashes.SHA256())
+        cert.public_key().verify(sig, msg, ec.ECDSA(hashes.SHA256()))
         ok("signature by the entity verifies under the issued certificate")
     except InvalidSignature:
         die("signature did not verify under the issued certificate")
@@ -104,7 +104,7 @@ def main():
     ok("malformed CSR rejected (400)") if r.status_code == 400 \
         else die(f"expected 400 on bad CSR, got {r.status_code}")
     # A well-formed CSR proving possession of a new key is not enough for a name already live.
-    intruder = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    intruder = ec.generate_private_key(ec.SECP256R1())
     same_name = (x509.CertificateSigningRequestBuilder().subject_name(subject)
                  .sign(intruder, hashes.SHA256()))
     r = requests.post(f"{CA}/ra/issue",

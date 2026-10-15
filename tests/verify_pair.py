@@ -8,7 +8,7 @@ import jwt
 import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,7 +32,7 @@ def die(msg):
 
 
 def ra_cert(cn: str):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     csr = (x509.CertificateSigningRequestBuilder()
            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)]))
            .sign(key, hashes.SHA256()))
@@ -45,7 +45,7 @@ def ra_cert(cn: str):
 
 
 def self_signed(cn: str):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
     now = datetime.datetime.now(datetime.timezone.utc)
     cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
@@ -61,7 +61,7 @@ def make_jws(key, cert_pem: str, payload: dict) -> str:
     key_pem = key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption())
-    return jwt.encode(payload, key_pem, algorithm="RS256",
+    return jwt.encode(payload, key_pem, algorithm="ES256",
                       headers={"x5c": [x5c], "typ": "application/pairing+json"})
 
 
@@ -74,13 +74,13 @@ def fake_platform():
              .not_valid_before(now).not_valid_after(now + datetime.timedelta(days=1))
              .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True))
         return b.sign(issuer_key, hashes.SHA256())
-    root_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    root_key = ec.generate_private_key(ec.SECP256R1())
     root_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Fake Platform Root")])
     root = make(root_name, root_name, root_key, root_key, True)
-    user_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    user_key = ec.generate_private_key(ec.SECP256R1())
     user = make(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "fake-user")]),
                 root_name, root_key, user_key, False)
-    vpp_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    vpp_key = ec.generate_private_key(ec.SECP256R1())
     vpp = make(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "fake-vpp")]),
                root_name, root_key, vpp_key, False)
     pem = lambda c: c.public_bytes(serialization.Encoding.PEM).decode()
@@ -91,7 +91,7 @@ def expired_from_ca(cn: str):
     """Minted with the CA key: a fixture the CA itself would never issue."""
     ca = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
     ca_key = serialization.load_pem_private_key((Path(CA_FILE).parent / "CA.key").read_bytes(), None)
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = ec.generate_private_key(ec.SECP256R1())
     now = datetime.datetime.now(datetime.timezone.utc)
     cert = (
         x509.CertificateBuilder()
