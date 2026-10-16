@@ -22,6 +22,7 @@ FACTORY_DEFAULTS = {
     "arl_number": 0,            # root's list of revoked issuing CAs
     "arl_next_update": None,
     "arl_revoked": [],
+    "vtn_serial": None,         # the VTN certificate seen on the last poll
     "processed": {},            # activation id -> its expiry, replay protection
     "last_activation": None,
     "history": [],              # executed, pending evidence

@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 
 import jwt  # PyJWT
+import requests
 from cryptography import x509
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -71,6 +72,31 @@ def _adopt_crls(crls: dict, cfg: dict) -> dict:
     if crls.get("platform") and issuers:
         out["platform"] = _adopt_list(crls["platform"], issuers[0], cfg, "crl")
     return out
+
+
+def _vtn_refusal(cfg: dict, peer: x509.Certificate) -> str | None:
+    """TLS verified the VTN's chain. The appliance adds what TLS does not know: that the peer is the
+    VPP it was paired with, and that the lists it holds do not name that certificate or its issuer."""
+    try:
+        paired = x509.load_pem_x509_certificate(Path(cfg["vpp_cert_file"]).read_bytes())
+        if peer.subject != paired.subject:
+            return "the VTN is not the VPP this appliance was paired with"
+    except Exception as e:
+        return f"paired VPP certificate unavailable: {e}"
+    if format(peer.serial_number, "x") in (cfg.get("crl_revoked") or []):
+        return "the VTN's certificate is revoked"
+    if _issuing_ca_revoked(cfg):
+        return "the issuing CA of the VTN's certificate is revoked"
+    return None
+
+
+def _vtn_serial_refused(cfg: dict) -> str | None:
+    """Whether the VTN certificate seen on the last poll is now listed, for exchanges the appliance opens blind."""
+    if cfg.get("vtn_serial") and cfg["vtn_serial"] in (cfg.get("crl_revoked") or []):
+        return "the VTN's certificate is revoked"
+    if _issuing_ca_revoked(cfg):
+        return "the issuing CA of the VTN's certificate is revoked"
+    return None
 
 
 def _issuing_ca_revoked(cfg: dict) -> bool:
@@ -254,15 +280,35 @@ def _poll_and_process() -> dict:
     if cfg["state"] != 1:
         raise NotConfigured("appliance is not paired yet")
 
-    _ensure_registered(cfg)
+    def refused(reason: str, crls: dict) -> dict:
+        device_config.save(cfg)
+        return {"polled": 0, "crl": crls.get("platform"), "arl": crls.get("root"), "calendar": None,
+                "executed": [], "refused": [], "status": "refused", "reason": reason}
 
-    body = vtn_client.poll(
-        cfg["vpp_mtls_url"], str(hsm.CA_FILE), *_ven_identity(),
-    )
+    status, body, peer = vtn_client.poll(cfg["vpp_mtls_url"], str(hsm.CA_FILE), *_ven_identity())
+    if not cfg.get("registration"):
+        # First contact after pairing: judge the channel with the lists held so far, register
+        # through it (idempotent at the VTN), and pull again if the VTN did not know us yet.
+        reason = _vtn_refusal(cfg, peer)
+        if reason:
+            return refused(reason, {})
+        _ensure_registered(cfg)
+        if status == 403:
+            status, body, peer = vtn_client.poll(cfg["vpp_mtls_url"], str(hsm.CA_FILE), *_ven_identity())
+    if status != 200:
+        raise requests.HTTPError(f"{status} from the VTN: {body}")
 
     # Revocation lists first: the calendar adopted next is judged against them.
     crls = _adopt_crls(body.get("crls") or {}, cfg)
     crl = crls.get("platform")
+
+    # With the lists current, the channel that delivered this body is judged: a revoked or
+    # unexpected VTN delivers nothing, and the serial is kept for the exchanges the appliance
+    # opens without first reading a list.
+    cfg["vtn_serial"] = format(peer.serial_number, "x")
+    reason = _vtn_refusal(cfg, peer)
+    if reason:
+        return refused(reason, crls)
 
     # Calendar before activations, so this pull's activations are judged against the latest one.
     calendar = None
@@ -311,7 +357,8 @@ def run_cycle() -> dict | None:
     if device_config.load()["state"] != 1:
         return None
     outcome = poll_and_process()
-    evidence = submit_evidence()
+    # Nothing goes to a VTN the poll just refused.
+    evidence = submit_evidence() if outcome.get("status") != "refused" else {"submitted": [], "rejected": []}
     return {**outcome, "evidence": evidence}
 
 
@@ -325,6 +372,9 @@ def _submit_evidence() -> dict:
     cfg = device_config.load()
     if cfg["state"] != 1:
         raise NotConfigured("appliance is not paired yet")
+    reason = _vtn_serial_refused(cfg)
+    if reason:
+        return {"submitted": [], "rejected": [], "status": "refused", "reason": reason}
 
     submitted, rejected = [], []
     for record in cfg.get("history", []):

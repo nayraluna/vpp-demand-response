@@ -101,8 +101,10 @@ once the new one is confirmed in use. Fix: a grace window in
 Relying parties decide from a list they already hold, which is what an
 appliance without network access needs, and nothing answers live status
 queries. The CRL is served over plain HTTP on :8083, as distribution points
-are, since it is checked by its signature. The Android app verifies the appliance and VPP certificates against
-the root but never fetches the CRL. Small for the app, medium for OCSP.
+are, since it is checked by its signature. The appliance looks the VTN's TLS
+certificate up in the lists it holds on every poll, but the Android app verifies
+the appliance and VPP certificates against the root and never fetches a CRL.
+Small for the app, medium for OCSP.
 
 ### DNIe validation gaps
 `isRevocationEnabled = false`, no DNIe policy OIDs as initial policies, the DNI
@@ -248,6 +250,11 @@ population of 20 users and 40 appliances.
   and die within minutes, and the RA refuses a request id it has already
   served. The bundle names the appliance it is for, so it cannot be carried to
   another device or replayed to this one once reset.
+- The appliance judges the channel that delivered each poll: the certificate
+  read off that very TLS connection must belong to the VPP it was paired with
+  and must not be named by the lists it holds, so a revoked or substituted VPP
+  delivers nothing even though TLS accepted its chain. Evidence is withheld
+  from a VTN whose last seen certificate is listed.
 
 - The PKI is a hierarchy: an offline root with pathLen 1 certifies a platform
   issuing CA and a device issuing CA, both pathLen 0. Leaves carry their issuing

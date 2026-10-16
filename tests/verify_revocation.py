@@ -394,7 +394,27 @@ def main():
             and next_update > datetime.datetime.now(datetime.timezone.utc) \
             else die(f"list not refreshed: {body.get('crl')}")
 
-        print("G12: once the owner is revoked, the appliance refuses the owner's calendar and activations")
+        print("G12: a VTN whose certificate the list names delivers nothing to the appliance")
+        # A list the platform CA really signed, numbered one above the CA's, naming the VPP's own
+        # certificate: planted in the relay row, the appliance adopts it and then refuses the channel.
+        _, live = fetch_crl()
+        vpp_serial = x509.load_pem_x509_certificate((CERTS / "vpp.crt").read_bytes()).serial_number
+        pkey = serialization.load_pem_private_key((CERTS / "platform-ca.key").read_bytes(), None)
+        naming_vpp = (x509.CertificateRevocationListBuilder().issuer_name(platform_ca().subject)
+                      .last_update(datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=5))
+                      .next_update(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1))
+                      .add_extension(x509.CRLNumber(live["crl_number"] + 1), critical=False)
+                      .add_revoked_certificate(x509.RevokedCertificateBuilder().serial_number(vpp_serial)
+                                               .revocation_date(datetime.datetime.now(datetime.timezone.utc)).build())
+                      .sign(pkey, hashes.SHA256()))
+        plant_crl(base64.b64encode(naming_vpp.public_bytes(serialization.Encoding.DER)).decode())
+        body = requests.post(f"{APP}/poll").json()
+        ok(f"appliance refused the channel: {body.get('reason')}") \
+            if body.get("status") == "refused" and "VTN" in body.get("reason", "") \
+            else die(f"a revoked VTN was still served: {body}")
+        clear_crl()
+
+        print("G13: once the owner is revoked, the appliance refuses the owner's calendar and activations")
         r = revoke(okey, opem, wserial, "keyCompromise")
         if r.status_code != 200:
             die(f"could not revoke the owner: {r.status_code} {r.text}")
@@ -412,7 +432,7 @@ def main():
         with sqlite3.connect(str(DB_FILE)) as c:
             c.execute("DELETE FROM activations WHERE activation_id IN (?, ?)", (act_a, act_b))
 
-        print("G13: with the CA unreachable, the VPP serves its copy only until nextUpdate")
+        print("G14: with the CA unreachable, the VPP serves its copy only until nextUpdate")
         # The VPP's verifier in-process, pointed at a dead port, holding the list it would have cached.
         sys.path.insert(0, str(ROOT / "vpp-server"))
         from app import revocation  # noqa: E402
@@ -432,7 +452,7 @@ def main():
         except revocation.Unavailable as e:
             ok(f"past nextUpdate the VPP refuses to decide: {str(e)[:60]}")
 
-        print("G14: an owner proof from a revoked appliance is refused")
+        print("G15: an owner proof from a revoked appliance is refused")
         # The user forwards the proof over their own channel, so the appliance never meets the door check.
         hkey, hpem, hcert, _ = ra_identity(f"holder-{secrets.token_hex(3)}")
         requests.post(f"{VPP}/enroll", json={"certificate": hpem}, verify=CA_FILE)
