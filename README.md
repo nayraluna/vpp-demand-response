@@ -21,14 +21,14 @@ The platform answers both with cryptography instead of surveillance. The user de
 | `android-app/` | User app: identity, pairing, availability, rewards | Kotlin, Jetpack Compose, Hilt |
 | `vpp-server/` | Coordinator, acts as the OpenADR **VTN** | Python, FastAPI + a mutual-TLS listener |
 | `appliance/` | The controllable load, acts as the OpenADR **VEN** | Python on a Raspberry Pi, software HSM |
-| `ca/` | Registration authority (validates) and certificate authority (signs) | Python, FastAPI |
+| `ca/` | Registration authority, in front of an offline root and two issuing CAs | Python, FastAPI |
 | `backoffice/` | Synthetic fleet and DR-operator CLI | Python |
 
 ![Deployment topology. The home network holds the mobile app and the appliance, the platform holds the CA and the VPP. Every connection is opened from the home outwards, so nothing reaches into the house.](docs/deployment-topology.png)
 
 ## Security design
 
-One X.509 root, P-256 keys throughout, TLS 1.3 only. RSA remains only on the DNIe.
+An offline root, two issuing CAs (one for appliances, one for platform credentials), an RA that holds no key, P-256 keys throughout, TLS 1.3 only. RSA remains only on the DNIe.
 
 **Identity is certified, not declared.** The appliance's nominal power is in its certificate subject (`OU=P=2000`). An appliance that inflates it at pairing is caught: the value it signs must match the certificate it presents.
 
@@ -46,9 +46,9 @@ One X.509 root, P-256 keys throughout, TLS 1.3 only. RSA remains only on the DNI
 
 The user's key is generated in the Android Keystore and is non-exportable. The app signs the CSR, the pairing bundle, the calendar and the mTLS handshake in place.
 
-**The appliance enforces its owner's calendar locally.** Not even the coordinator can activate it outside the declared slots, its maximum curtailment time or its recovery period. Activations arrive by outbound polling only, so nothing connects *into* the home. The appliance trusts only the root installed at the factory next to its signing key.
+**The appliance enforces its owner's calendar locally.** Not even the coordinator can activate it outside the declared slots, its maximum curtailment time or its recovery period. Activations arrive by outbound polling only, so nothing connects *into* the home. The appliance trusts only the root installed at the factory next to its signing key, and validates every credential through its issuing CA.
 
-**Credentials are revoked and renewed.** An operator revokes by serial with a signed request. The CA publishes an RFC 5280 CRL signed with the root key, with a monotonic CRL number and a 24 hour validity, named in every leaf's distribution point. The VPP checks it on every mutual-TLS request, at enrolment and on the signer of every artefact it accepts, and relays it to the appliance, which verifies it against its factory root, refuses a lower number and stops acting when its copy expires. The CA issues one live certificate per subject. Renewal re-keys under the same subject and supersedes the old certificate in the same act.
+**Credentials are revoked and renewed.** An operator revokes by serial with a signed request. Each issuing CA publishes an RFC 5280 CRL with a monotonic number and a 24 hour validity, named in every leaf's distribution point, and the root publishes the list that revokes an issuing CA. The VPP checks them on every mutual-TLS request, at enrolment and on the signer of every artefact it accepts, and relays them to the appliance, which verifies each against its factory root, refuses a lower number and stops acting when its copy expires or its owner's issuing CA is revoked. Each CA issues one live certificate per subject. Renewal re-keys under the same subject and supersedes the old certificate in the same act.
 
 **Identity proof with the Spanish eID.** The app reads the DNIe over NFC through a PACE channel, validates the chain to `AC RAIZ DNIE 2`, and has the chip sign a fresh nonce with the user's PIN, so a copied public certificate cannot pass for a login. The DNI stays on the phone: the platform certificate carries a random pseudonym.
 
@@ -58,7 +58,7 @@ The user's key is generated in the Android Keystore and is non-exportable. The a
 powershell -ExecutionPolicy Bypass -File .\run_all.ps1
 ```
 
-16 gates, 204 checks. Every protocol step runs against its positive *and* its negative cases over the real stack, with real TLS and a real database: certificates outside the chain, invalid signatures, replayed activations, forged capacities, evidence submitted twice, revoked credentials at the mutual-TLS door, a client limited to TLS 1.2, a rolled-back revocation list, and a rolled-back calendar planted directly in the row the appliance polls.
+16 gates, 210 checks. Every protocol step runs against its positive *and* its negative cases over the real stack, with real TLS and a real database: certificates outside the chain, invalid signatures, replayed activations, forged capacities, evidence submitted twice, revoked credentials at the mutual-TLS door, a client limited to TLS 1.2, a rolled-back revocation list, and a rolled-back calendar planted directly in the row the appliance polls.
 
 `RegistrationFlowTest` drives the app's real protocol clients against the live servers from the JVM. `tests/verify_pi.py` runs a complete DR event against a Raspberry Pi over a real network (11 checks). Registration, QR pairing and DNIe login were completed on a physical phone.
 
@@ -72,7 +72,7 @@ The HSM is emulated, the curtailment is simulated, identity is not verified at i
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-python provision_all.py                      # root, then each component's own key and CSR
+python provision_all.py                      # root and issuing CAs, then each component's own key and CSR
 powershell -ExecutionPolicy Bypass -File .\run_all.ps1
 ```
 

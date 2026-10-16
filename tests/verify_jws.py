@@ -33,11 +33,17 @@ def b64url(obj) -> str:
 
 
 def chains_to_ca(cert, ca) -> bool:
-    try:
-        cert.verify_directly_issued_by(ca)
-        return True
-    except Exception:
-        return False
+    """Through an issuing CA to the root: a leaf the root signed directly is not a platform certificate."""
+    issuing = [x509.load_pem_x509_certificate((CERTS / f).read_bytes())
+               for f in ("platform-ca.crt", "device-ca.crt")]
+    for issuer in issuing:
+        try:
+            cert.verify_directly_issued_by(issuer)
+            issuer.verify_directly_issued_by(ca)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 def main():
@@ -50,8 +56,8 @@ def main():
     header = jwt.get_unverified_header(token)
     ok(f"header alg = {header['alg']}") if header.get("alg") in ("RS256", "ES256") \
         else die(f"unexpected alg: {header.get('alg')}")
-    ok("header carries x5c (the VPP certificate)") if "x5c" in header \
-        else die("no x5c header")
+    ok(f"header carries x5c with the chain ({len(header.get('x5c', []))} certificates)") if len(header.get("x5c", [])) == 2 \
+        else die("x5c must carry the VPP certificate and its issuing CA")
     ok(f"header typ = {header.get('typ')}")
 
     cert = x509.load_der_x509_certificate(base64.b64decode(header["x5c"][0]))

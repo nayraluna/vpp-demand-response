@@ -10,8 +10,6 @@ import com.example.tfgvpp.domain.model.User
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.security.cert.CertificateFactory
-import java.security.cert.X509Certificate
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -41,22 +39,19 @@ class SessionManager @Inject constructor(
         val persisted = store.load() ?: return null
         val privateKey = keystore.loadPrivateKey() ?: return null
 
-        val cf = CertificateFactory.getInstance("X.509")
-        val userCert = cf.generateCertificate(
-            persisted.userCertPem.byteInputStream()) as X509Certificate
-        val vppCert = cf.generateCertificate(
-            persisted.vppCertPem.byteInputStream()) as X509Certificate
+        val userChain = RegistrationClient.parseChain(persisted.userCertPem)
+        val vppChain = RegistrationClient.parseChain(persisted.vppCertPem)
 
         val credential = RegistrationClient.UserCredential(
-            privateKey, userCert, persisted.userCertPem)
+            privateKey, userChain.first(), persisted.userCertPem)
         val registration = RegistrationClient.Registration(
             credential = credential,
             subject = credential.subject,
             raSerial = persisted.raSerial,
-            userCertChainsToRa = chainsToRa(userCert),
+            userCertChainsToRa = RegistrationClient.validatesToRoot(userChain, ca.certificate),
             enrollStatus = persisted.enrollStatus,
             vppCertificatePem = persisted.vppCertPem,
-            vppCertChainsToRa = chainsToRa(vppCert),
+            vppCertChainsToRa = RegistrationClient.validatesToRoot(vppChain, ca.certificate),
         )
         return ActiveSession(registration, persisted.holderName, persisted.dni)
             .also { _session.value = it }
@@ -82,9 +77,6 @@ class SessionManager @Inject constructor(
         keystore.clear()
         _session.value = null
     }
-
-    private fun chainsToRa(cert: X509Certificate): Boolean =
-        RegistrationClient.validatesToRoot(cert, ca.certificate)
 }
 
 fun SessionManager.ActiveSession.toUser(): User = User(

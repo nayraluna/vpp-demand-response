@@ -88,9 +88,9 @@ def fake_platform():
 
 
 def expired_from_ca(cn: str):
-    """Minted with the CA key: a fixture the CA itself would never issue."""
-    ca = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
-    ca_key = serialization.load_pem_private_key((Path(CA_FILE).parent / "CA.key").read_bytes(), None)
+    """Minted with the issuing CA's key: a fixture the CA itself would never issue."""
+    ca = x509.load_pem_x509_certificate((Path(CA_FILE).parent / "platform-ca.crt").read_bytes())
+    ca_key = serialization.load_pem_private_key((Path(CA_FILE).parent / "platform-ca.key").read_bytes(), None)
     key = ec.generate_private_key(ec.SECP256R1())
     now = datetime.datetime.now(datetime.timezone.utc)
     cert = (
@@ -108,7 +108,8 @@ def expired_from_ca(cn: str):
             crl_sign=False, encipher_only=False, decipher_only=False), critical=True)
         .sign(ca_key, hashes.SHA256())
     )
-    return key, cert.public_bytes(serialization.Encoding.PEM).decode()
+    pem = lambda c: c.public_bytes(serialization.Encoding.PEM).decode()
+    return key, pem(cert) + pem(ca)
 
 
 def bundle() -> dict:

@@ -1,14 +1,15 @@
-import base64
 import datetime
 import sys
 from pathlib import Path
 
 import jwt  # PyJWT
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 import hsm  # noqa: E402
+from pki import chain as pki_chain  # noqa: E402
+from pki import jws as pki_jws  # noqa: E402
 
 from . import config as device_config  # noqa: E402
 
@@ -21,28 +22,14 @@ class AlreadyPaired(Exception):
     """Already in state 1, a factory reset is required first."""
 
 
-def _issued_by(cert: x509.Certificate, issuer: x509.Certificate) -> bool:
-    """Signed by the issuer, the issuer still a valid CA, the leaf an end entity that may sign."""
-    try:
-        cert.verify_directly_issued_by(issuer)
-        now = datetime.datetime.now(datetime.timezone.utc)
-        if not (issuer.not_valid_before_utc <= now <= issuer.not_valid_after_utc):
-            return False
-        if not issuer.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
-            return False
-        # The leaf must be an end entity allowed to sign, not a CA certificate used as one.
-        if cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
-            return False
-        return cert.extensions.get_extension_for_class(x509.KeyUsage).value.digital_signature
-    except Exception:
-        # Fail closed: any verification error means "not issued by this issuer".
-        return False
+def _issued_under_root(cert: x509.Certificate, carried: list[x509.Certificate] = ()) -> x509.Certificate | None:
+    """The issuing CA under which `cert` chains to the factory root, or None. Fails closed on any error."""
+    return pki_chain.issued_under(cert, list(carried) + hsm.known_issuers(), hsm.trust_anchor())
 
 
 def _within_validity(cert: x509.Certificate) -> bool:
     """Expired certificates drop off the CRL, so this keeps a withdrawn credential refused past its expiry."""
-    now = datetime.datetime.now(datetime.timezone.utc)
-    return cert.not_valid_before_utc <= now <= cert.not_valid_after_utc
+    return pki_chain.within_validity(cert)
 
 
 def pair(jws_token: str) -> dict:
@@ -54,35 +41,29 @@ def pair(jws_token: str) -> dict:
         header = jwt.get_unverified_header(jws_token)
     except Exception as e:
         raise InvalidBundle(f"not a JWS: {e}")
-    x5c = header.get("x5c")
-    if not x5c:
+    certs = pki_chain.x5c_chain(header)
+    if not certs:
         raise InvalidBundle("bundle has no owner certificate (x5c)")
-    owner = x509.load_der_x509_certificate(base64.b64decode(x5c[0]))
-
-    owner_pub = owner.public_key().public_bytes(
-        serialization.Encoding.PEM,
-        serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
+    owner = certs[0]
     try:
-        payload = jwt.decode(jws_token, owner_pub, algorithms=["RS256", "ES256"])
+        payload = pki_jws.decode_with(jws_token, owner)
     except Exception as e:
         raise InvalidBundle(f"owner signature invalid: {e}")
 
     # Any cert_ra in the bundle is ignored: a root received over the channel it protects
     # would let anyone on the LAN enrol an unpaired appliance into a VPP of their own.
-    root = hsm.trust_anchor()
     try:
-        cert_vpp = x509.load_pem_x509_certificate(payload["cert_vpp"].encode())
+        vpp_chain = pki_chain.load_pem_chain(payload["cert_vpp"])
+        cert_vpp = vpp_chain[0]
     except Exception as e:
         raise InvalidBundle(f"missing/invalid VPP certificate in bundle: {e}")
-    if not _issued_by(owner, root):
-        raise InvalidBundle("owner certificate not issued by the platform CA")
-    if not _within_validity(owner):
-        raise InvalidBundle("owner certificate expired or not yet valid")
-    if not _issued_by(cert_vpp, root):
-        raise InvalidBundle("VPP certificate not issued by the platform CA")
-    if not _within_validity(cert_vpp):
-        raise InvalidBundle("VPP certificate expired or not yet valid")
+    # Validity is part of the chain check: an expired signer has no path to the root.
+    if _issued_under_root(owner, certs[1:]) is None:
+        raise InvalidBundle("owner certificate not issued under the platform root"
+                            if _within_validity(owner) else "owner certificate expired or not yet valid")
+    if _issued_under_root(cert_vpp, vpp_chain[1:]) is None:
+        raise InvalidBundle("VPP certificate not issued under the platform root"
+                            if _within_validity(cert_vpp) else "VPP certificate expired or not yet valid")
 
     owner_subject = owner.subject.rfc4514_string()
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()

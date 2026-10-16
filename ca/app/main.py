@@ -1,3 +1,9 @@
+"""The RA process: the platform's issuance front, holding no key.
+
+It validates requests over TLS on :8081, hands them to the CA process over loopback, and
+distributes the trust anchor and the CRLs, also over plain HTTP on :8083 for the clients
+that follow a distribution point.
+"""
 import os
 import threading
 from contextlib import asynccontextmanager
@@ -6,17 +12,25 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel
 
-from . import ca_service, ra_service, registry
+from . import ca_client, ra_service
 
 CRL_HTTP_PORT = int(os.environ.get("TFG_CRL_HTTP_PORT", "8083"))
+CRL_ISSUERS = ("platform", "device", "root")
+
+
+def _crl_bytes(issuer: str) -> bytes:
+    if issuer not in CRL_ISSUERS:
+        raise KeyError(issuer)
+    return ca_client.crl(issuer)
 
 
 class _CrlHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path != "/ra/crl":
+        prefix = "/ra/crl/"
+        if not self.path.startswith(prefix) or self.path[len(prefix):] not in CRL_ISSUERS:
             self.send_error(404)
             return
-        body = ca_service.crl_der()
+        body = _crl_bytes(self.path[len(prefix):])
         self.send_response(200)
         self.send_header("Content-Type", "application/pkix-crl")
         self.send_header("Content-Length", str(len(body)))
@@ -29,11 +43,11 @@ class _CrlHandler(BaseHTTPRequestHandler):
 
 def _serve_crl_over_http() -> ThreadingHTTPServer | None:
     """The CRL is signed, so it needs no TLS, and fetching it must not depend on a TLS
-    check that could itself need the CRL. This listener serves the CRL and nothing else."""
+    check that could itself need the CRL. This listener serves the CRLs and nothing else."""
     try:
         server = ThreadingHTTPServer(("0.0.0.0", CRL_HTTP_PORT), _CrlHandler)
     except OSError as e:
-        print(f"[ca] CRL over HTTP not started on :{CRL_HTTP_PORT}: {e}")
+        print(f"[ra] CRL over HTTP not started on :{CRL_HTTP_PORT}: {e}")
         return None
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
@@ -41,28 +55,26 @@ def _serve_crl_over_http() -> ThreadingHTTPServer | None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    ca_service.initialize()
+    ra_service.initialize()
     crl_http = _serve_crl_over_http()
-    print(f"[ca] CA loaded; CRL also served over HTTP on :{CRL_HTTP_PORT}")
+    print(f"[ra] RA loaded (no key); CRLs also served over HTTP on :{CRL_HTTP_PORT}")
     yield
     if crl_http:
         crl_http.shutdown()
 
 
-# One process hosts both roles in the prototype: the RA validates, the CA signs. Only
-# ca_service reads the key, so the split into two hosts is a transport change.
-app = FastAPI(title="Registration Authority (RA) and Certificate Authority (CA)",
-              version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Registration Authority (RA)", version="0.4.0", lifespan=lifespan)
 
 
 @app.get("/ping")
 def ping() -> dict:
-    return {"status": "ok", "service": "ca"}
+    return {"status": "ok", "service": "ra"}
 
 
 @app.get("/ra/certificate")
 def ra_certificate() -> dict:
-    return {"certificate": ca_service.certificate_pem()}
+    """The trust anchor, plus the issuing certificates a verifier may need to build a path."""
+    return {"certificate": ra_service.root_pem(), "issuing": ra_service.issuing_pems()}
 
 
 class CsrRequest(BaseModel):
@@ -76,8 +88,8 @@ def ra_issue(req: CsrRequest) -> dict:
         return ra_service.issue_from_csr(req.csr)
     except ra_service.InvalidCSR as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except ra_service.AlreadyEnrolled as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    except ca_client.Refused as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
 
 
 class RevocationRequest(BaseModel):
@@ -88,26 +100,22 @@ class RevocationRequest(BaseModel):
 def ra_revoke(req: RevocationRequest) -> dict:
     try:
         order = ra_service.verify_revocation_request(req.request)
+        done = ca_client.revoke(order["serial"], order["reason"], order["requested_by"])
     except ra_service.InvalidRequest as e:
         raise HTTPException(status_code=400, detail=str(e))
     except ra_service.NotOperator as e:
         raise HTTPException(status_code=403, detail=str(e))
-
-    serial = order["serial"]
-    if ca_service.revoke(serial, order["reason"], by=order["requested_by"]):
-        return {"revoked": serial, "reason": order["reason"],
-                "requested_by": order["requested_by"],
-                "crl_number": registry.crl_number()}
-    known = registry.lookup(serial)
-    if known is None:
-        raise HTTPException(status_code=404, detail="serial not issued by this CA")
-    raise HTTPException(status_code=409,
-                        detail=f"already revoked at {known['revoked_at']}")
+    except ca_client.Refused as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+    return {**done, "reason": order["reason"], "requested_by": order["requested_by"]}
 
 
-@app.get("/ra/crl")
-def ra_crl() -> Response:
-    return Response(content=ca_service.crl_der(), media_type="application/pkix-crl")
+@app.get("/ra/crl/{issuer}")
+def ra_crl(issuer: str) -> Response:
+    try:
+        return Response(content=_crl_bytes(issuer), media_type="application/pkix-crl")
+    except KeyError:
+        raise HTTPException(status_code=404, detail="unknown issuer")
 
 
 class RenewalRequest(BaseModel):
@@ -118,9 +126,7 @@ class RenewalRequest(BaseModel):
 def ra_renew(req: RenewalRequest) -> dict:
     try:
         return ra_service.renew_from_request(req.request)
-    except ra_service.InvalidRequest as e:
+    except (ra_service.InvalidRequest, ra_service.InvalidCSR) as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except ra_service.InvalidCSR as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except ra_service.AlreadyEnrolled as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    except ca_client.Refused as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)

@@ -7,14 +7,16 @@ from pathlib import Path
 
 import jwt  # PyJWT
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import hsm  # noqa: E402
 import vtn_client  # noqa: E402
 
 from . import config as device_config  # noqa: E402
-from .pairing_service import _issued_by, _within_validity  # noqa: E402
+from .pairing_service import _issued_under_root, _within_validity  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from pki import chain as pki_chain  # noqa: E402
+from pki import jws as pki_jws  # noqa: E402
 
 SLOT_MINUTES = 30
 SLOTS_PER_DAY = 24 * 60 // SLOT_MINUTES
@@ -30,18 +32,14 @@ class NotConfigured(Exception):
     """The appliance is still in pairing mode."""
 
 
-def _adopt_crl(der_b64: str, cfg: dict) -> dict:
-    """Adopt the CA's X.509 CRL the VTN relays. The CRL number must not go
-    backwards, or a VPP could serve an older list to hide a revocation."""
-    try:
-        root = hsm.trust_anchor()
-    except Exception as e:
-        return {"status": "refused", "reason": f"factory root unavailable: {e}"}
+def _adopt_list(der_b64: str, signer: x509.Certificate, cfg: dict, prefix: str) -> dict:
+    """Adopt one X.509 CRL the VTN relays, verified against the CA that must have signed it.
+    The CRL number must not go backwards, or a VPP could serve an older list to hide a revocation."""
     try:
         crl = x509.load_der_x509_crl(base64.b64decode(der_b64))
     except Exception as e:
         return {"status": "refused", "reason": f"revocation list is malformed: {e}"}
-    if crl.issuer != root.subject or not crl.is_signature_valid(root.public_key()):
+    if crl.issuer != signer.subject or not crl.is_signature_valid(signer.public_key()):
         return {"status": "refused", "reason": "revocation list not signed by the CA"}
     try:
         number = crl.extensions.get_extension_for_class(x509.CRLNumber).value.crl_number
@@ -49,30 +47,45 @@ def _adopt_crl(der_b64: str, cfg: dict) -> dict:
         return {"status": "refused", "reason": "revocation list carries no CRL number"}
     if crl.next_update_utc is None:
         return {"status": "refused", "reason": "revocation list carries no nextUpdate"}
-    stored = cfg.get("crl_number") or 0
+    stored = cfg.get(f"{prefix}_number") or 0
     if number < stored:
         return {"status": "refused",
                 "reason": f"stale revocation list {number} (ours is {stored}): "
                           "an older list cannot replace a newer one"}
 
     # An equal number still refreshes nextUpdate: the CA re-signs the same list with a new window.
-    cfg["crl_number"] = number
-    cfg["crl_next_update"] = crl.next_update_utc.isoformat()
-    cfg["crl_revoked"] = [format(r.serial_number, "x") for r in crl]
+    cfg[f"{prefix}_number"] = number
+    cfg[f"{prefix}_next_update"] = crl.next_update_utc.isoformat()
+    cfg[f"{prefix}_revoked"] = [format(r.serial_number, "x") for r in crl]
     return {"status": "current" if number == stored else "stored",
-            "crl_number": number, "revoked": len(cfg["crl_revoked"])}
+            "crl_number": number, "revoked": len(cfg[f"{prefix}_revoked"])}
+
+
+def _adopt_crls(crls: dict, cfg: dict) -> dict:
+    """The appliance needs two lists: the platform CA's, for its owner, and the root's, for the
+    platform CA itself. Each is verified against the certificate that must have signed it."""
+    out = {}
+    issuers = hsm.known_issuers()
+    if crls.get("root"):
+        out["root"] = _adopt_list(crls["root"], hsm.trust_anchor(), cfg, "arl")
+    if crls.get("platform") and issuers:
+        out["platform"] = _adopt_list(crls["platform"], issuers[0], cfg, "crl")
+    return out
+
+
+def _issuing_ca_revoked(cfg: dict) -> bool:
+    """Whether the root's list names the platform issuing CA the appliance trusts for its owner."""
+    issuers = hsm.known_issuers()
+    return bool(issuers) and format(issuers[0].serial_number, "x") in (cfg.get("arl_revoked") or [])
 
 
 def _adopt_calendar(jws_token: str, cfg: dict) -> dict:
     """Adopt the owner-signed calendar the VTN relays: only the owner's signature is
     trusted and the version must increase, so the VPP can neither alter nor roll it back."""
     try:
-        header = jwt.get_unverified_header(jws_token)
-        owner = x509.load_der_x509_certificate(base64.b64decode(header["x5c"][0]))
-        owner_pub = owner.public_key().public_bytes(
-            serialization.Encoding.PEM,
-            serialization.PublicFormat.SubjectPublicKeyInfo)
-        payload = jwt.decode(jws_token, owner_pub, algorithms=["RS256", "ES256"])
+        certs = pki_chain.x5c_chain(jwt.get_unverified_header(jws_token))
+        owner = certs[0]
+        payload = pki_jws.decode_with(jws_token, owner)
     except Exception as e:
         return {"status": "refused",
                 "reason": f"unsigned or malformed calendar: {e}"}
@@ -80,18 +93,17 @@ def _adopt_calendar(jws_token: str, cfg: dict) -> dict:
     # The signer must chain to the factory root. Matching the owner's name alone would let
     # anyone, the VPP included, mint a self-signed certificate with that subject.
     try:
-        root = hsm.trust_anchor()
+        issuer = _issued_under_root(owner, certs[1:])
     except Exception as e:
         return {"status": "refused", "reason": f"factory root unavailable: {e}"}
-    if not _issued_by(owner, root):
+    if issuer is None:
         return {"status": "refused",
-                "reason": "calendar signer not certified by the CA"}
-    if not _within_validity(owner):
-        return {"status": "refused",
-                "reason": "calendar signer certificate expired or not yet valid"}
+                "reason": "calendar signer not certified by the CA"
+                          if _within_validity(owner) else
+                          "calendar signer certificate expired or not yet valid"}
 
-    # A withdrawn signer still verifies, the list adopted earlier in this poll decides.
-    if format(owner.serial_number, "x") in (cfg.get("crl_revoked") or []):
+    # A withdrawn signer still verifies, the lists adopted earlier in this poll decide.
+    if format(owner.serial_number, "x") in (cfg.get("crl_revoked") or []) or _issuing_ca_revoked(cfg):
         return {"status": "refused",
                 "reason": "calendar signer certificate is revoked"}
 
@@ -148,6 +160,8 @@ def _check(activation: dict, cfg: dict, now: datetime.datetime) -> str | None:
         return f"revocation list expired at {next_update}, refusing to act"
     if cfg.get("owner_serial") and cfg["owner_serial"] in (cfg.get("crl_revoked") or []):
         return "owner certificate is revoked"
+    if _issuing_ca_revoked(cfg):
+        return "the issuing CA of the owner's certificate is revoked"
 
     day, start, end = activation["day"], activation["slot_start"], activation["slot_end"]
     if day not in DAYS or not (0 <= start < end <= SLOTS_PER_DAY):
@@ -246,10 +260,9 @@ def _poll_and_process() -> dict:
         cfg["vpp_mtls_url"], str(hsm.CA_FILE), *_ven_identity(),
     )
 
-    # Revocation list first: the calendar adopted next is judged against it.
-    crl = None
-    if body.get("crl"):
-        crl = _adopt_crl(body["crl"], cfg)
+    # Revocation lists first: the calendar adopted next is judged against them.
+    crls = _adopt_crls(body.get("crls") or {}, cfg)
+    crl = crls.get("platform")
 
     # Calendar before activations, so this pull's activations are judged against the latest one.
     calendar = None
@@ -289,7 +302,7 @@ def _poll_and_process() -> dict:
         executed.append(record)
 
     device_config.save(cfg)
-    return {"polled": len(activations), "crl": crl, "calendar": calendar,
+    return {"polled": len(activations), "crl": crl, "arl": crls.get("root"), "calendar": calendar,
             "executed": executed, "refused": refused}
 
 
@@ -352,5 +365,6 @@ def status() -> dict:
             "crl_number": cfg.get("crl_number") or 0,
             "crl_next_update": cfg.get("crl_next_update"),
             "crl_revoked": len(cfg.get("crl_revoked") or []),
+            "arl_number": cfg.get("arl_number") or 0,
             "last_activation": cfg.get("last_activation"),
             "executed_count": len(cfg.get("history", []))}

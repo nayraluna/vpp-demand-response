@@ -26,4 +26,4 @@ Write-Host "Services running (PIDs: $(($procs | ForEach-Object { $_.Id }) -join 
 Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
     Where-Object { $_.LocalPort -in $Ports } |
     Select-Object LocalAddress, LocalPort | Sort-Object LocalPort | Format-Table -AutoSize
-Write-Host "Stop them with:  Get-NetTCPConnection -State Listen | ? { `$_.LocalPort -in 8080,8081,8082,8083,8443 } | % { Stop-Process -Id `$_.OwningProcess -Force }"
+Write-Host "Stop them with:  Get-NetTCPConnection -State Listen | ? { `$_.LocalPort -in 8080,8081,8082,8083,8084,8443 } | % { Stop-Process -Id `$_.OwningProcess -Force }"

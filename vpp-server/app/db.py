@@ -83,19 +83,15 @@ def initialize() -> None:
         # Evidence from before the owner was recorded goes to whoever owned the appliance then.
         c.execute("UPDATE evidence SET owner = (SELECT owner FROM appliances a"
                   " WHERE a.ven_subject = evidence.ven_subject) WHERE owner IS NULL")
-        # Last fetched CRL (base64 DER), relayed verbatim to the appliance in the poll response.
+        # Last fetched CRLs (base64 DER), one per issuer, relayed verbatim to the appliance.
+        c.execute("DROP TABLE IF EXISTS crl")
         c.execute(
-            """CREATE TABLE IF NOT EXISTS crl(
-                   id         INTEGER PRIMARY KEY CHECK (id = 1),
+            """CREATE TABLE IF NOT EXISTS crls(
+                   issuer     TEXT PRIMARY KEY,
                    der        TEXT NOT NULL,
                    crl_number INTEGER NOT NULL,
                    fetched_at TEXT NOT NULL)"""
         )
-        try:
-            c.execute("ALTER TABLE crl RENAME COLUMN jws TO der")
-            c.execute("DELETE FROM crl")
-        except sqlite3.OperationalError:
-            pass
 
 
 def get_user(subject: str) -> dict | None:
@@ -319,25 +315,28 @@ def add_registration(ven_subject: str, ven_id: str, registration_id: str,
         )
 
 
-def store_crl(der_b64: str, crl_number: int, fetched_at: str) -> None:
+def store_crl(issuer: str, der_b64: str, crl_number: int, fetched_at: str) -> None:
     """Never moves to a lower crl_number, so an older list can never replace the held one."""
     with _conn() as c:
         c.execute(
-            """INSERT INTO crl(id, der, crl_number, fetched_at) VALUES(1, ?, ?, ?)
-               ON CONFLICT(id) DO UPDATE SET
+            """INSERT INTO crls(issuer, der, crl_number, fetched_at) VALUES(?, ?, ?, ?)
+               ON CONFLICT(issuer) DO UPDATE SET
                    der=excluded.der, crl_number=excluded.crl_number,
                    fetched_at=excluded.fetched_at
-               WHERE excluded.crl_number >= crl.crl_number""",
-            (der_b64, crl_number, fetched_at),
+               WHERE excluded.crl_number >= crls.crl_number""",
+            (issuer, der_b64, crl_number, fetched_at),
         )
 
 
-def get_crl() -> str | None:
+def get_crl(issuer: str) -> str | None:
     with _conn() as c:
-        row = c.execute("SELECT der FROM crl WHERE id=1").fetchone()
+        row = c.execute("SELECT der FROM crls WHERE issuer=?", (issuer,)).fetchone()
     return row[0] if row else None
 
 
-def clear_crl() -> None:
+def clear_crl(issuer: str | None = None) -> None:
     with _conn() as c:
-        c.execute("DELETE FROM crl")
+        if issuer is None:
+            c.execute("DELETE FROM crls")
+        else:
+            c.execute("DELETE FROM crls WHERE issuer=?", (issuer,))

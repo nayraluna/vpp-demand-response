@@ -34,7 +34,7 @@ powershell -ExecutionPolicy Bypass -File .\run_all.ps1
 
 Ends in `ALL GATES PASSED`.
 
-The script frees ports 8080, 8081, 8082, 8083 and 8443 before starting, so the gates
+The script frees ports 8080, 8081, 8082, 8083, 8084 and 8443 before starting, so the gates
 always run against their own services with their own environment. A failing
 gate is therefore a real failure. Investigate it rather than re-running.
 
@@ -56,7 +56,7 @@ Check the services answer:
 
 ```powershell
 curl.exe -k https://127.0.0.1:8080/ping   # "service":"vpp"
-curl.exe -k https://127.0.0.1:8081/ping   # "service":"ca"
+curl.exe -k https://127.0.0.1:8081/ping   # "service":"ra"
 curl.exe http://127.0.0.1:8082/ping       # "service":"appliance","state":1
 ```
 
@@ -234,7 +234,7 @@ high, pairing ten times, because the appliance signs its owner proof there.
 The services run with a hidden window, so stop them by port:
 
 ```powershell
-foreach ($p in 8080, 8081, 8082, 8083, 8443) {
+foreach ($p in 8080, 8081, 8082, 8083, 8084, 8443) {
     Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
 }
@@ -252,7 +252,7 @@ the app has to hand that same address to the appliance during pairing, because
 a Raspberry Pi can never reach a `127.0.0.1` it was given:
 
 ```bash
-EXTRA_SAN_IPS="<pc-lan-address>" TFG_CRL_URL="http://<pc-lan-address>:8083/ra/crl" python provision_all.py
+EXTRA_SAN_IPS="<pc-lan-address>" TFG_CRL_BASE="http://<pc-lan-address>:8083/ra/crl" python provision_all.py
 echo "vpp.lan.host=<pc-lan-address>" >> android-app/local.properties
 ```
 
@@ -308,9 +308,10 @@ Regenerating it invalidates every existing certificate. Full order:
    is copied. On the Pi, `python appliance/provision.py request --ven ven-0002`
    writes `~/certs/VEN.key` and `~/certs/VEN.csr`. Copy only the CSR to the PC
    and sign it there,
-   `python ca/sign_csr.py --csr VEN.csr --out VEN.crt --profile client`, then
-   copy `VEN.crt` and `certs/CA.crt` to the Pi's `~/certs/` and run
-   `python appliance/provision.py install certs/VEN.crt certs/CA.crt` there.
+   `python ca/sign_csr.py --csr VEN.csr --out VEN.crt --issuer device --profile client`,
+   then copy `VEN.crt`, `certs/CA.crt` and `certs/platform-ca.crt` to the Pi's
+   `~/certs/` and run
+   `python appliance/provision.py install certs/VEN.crt certs/CA.crt certs/platform-ca.crt` there.
    Restart `appliance.service`, factory reset the Pi with
    `POST http://<pi-address>:8082/factory-reset`, and re-pair it.
 7. Verify in order: `run_all.ps1`, then the JVM flow test, then `verify_pi.py`.

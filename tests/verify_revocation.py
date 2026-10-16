@@ -26,7 +26,7 @@ VPP = "https://127.0.0.1:8080"
 CA = "https://127.0.0.1:8081"
 MTLS = "https://127.0.0.1:8443"
 APP = "http://127.0.0.1:8082"
-CRL_HTTP = "http://127.0.0.1:8083/ra/crl"
+CRL_HTTP = "http://127.0.0.1:8083/ra/crl/platform"
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 passed = 0
@@ -114,6 +114,11 @@ def root_cert() -> x509.Certificate:
     return x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
 
 
+def platform_ca() -> x509.Certificate:
+    """The issuing CA that signs user, operator and VPP certificates, and their CRL."""
+    return x509.load_pem_x509_certificate((Path(CA_FILE).parent / "platform-ca.crt").read_bytes())
+
+
 def crl_view(crl: x509.CertificateRevocationList) -> dict:
     """The CRL's fields as a plain dict: number, issuer, dates, and one entry per serial."""
     def reason(e):
@@ -138,13 +143,13 @@ def make_crl(key, issuer: x509.Name, number: int, next_update: datetime.datetime
 
 
 def fetch_crl() -> tuple[str, dict]:
-    """The CA's CRL verified against the root: its base64 DER (what the VPP relays) and a view of it."""
-    r = requests.get(f"{CA}/ra/crl", verify=CA_FILE)
+    """The platform CA's CRL verified against it: its base64 DER (what the VPP relays) and a view of it."""
+    r = requests.get(f"{CA}/ra/crl/platform", verify=CA_FILE)
     r.raise_for_status()
     crl = x509.load_der_x509_crl(r.content)
-    root = root_cert()
-    if crl.issuer != root.subject or not crl.is_signature_valid(root.public_key()):
-        die("the CRL served is not signed by the CA")
+    signer = platform_ca()
+    if crl.issuer != signer.subject or not crl.is_signature_valid(signer.public_key()):
+        die("the CRL served is not signed by the platform issuing CA")
     return base64.b64encode(r.content).decode(), crl_view(crl)
 
 
@@ -173,16 +178,16 @@ def onboard(key, cert_pem: str, client) -> str:
 
 
 def plant_crl(der_b64: str) -> None:
-    """A misbehaving VPP: the relayed copy, numbered high so the VPP's own refresh keeps it."""
+    """A misbehaving VPP: the relayed platform copy, numbered high so the VPP's own refresh keeps it."""
     with sqlite3.connect(str(DB_FILE)) as c:
-        c.execute("INSERT INTO crl(id, der, crl_number, fetched_at) VALUES(1, ?, 999999, 'planted')"
-                  " ON CONFLICT(id) DO UPDATE SET der=excluded.der,"
+        c.execute("INSERT INTO crls(issuer, der, crl_number, fetched_at) VALUES('platform', ?, 999999, 'planted')"
+                  " ON CONFLICT(issuer) DO UPDATE SET der=excluded.der,"
                   " crl_number=excluded.crl_number, fetched_at=excluded.fetched_at", (der_b64,))
 
 
 def clear_crl() -> None:
     with sqlite3.connect(str(DB_FILE)) as c:
-        c.execute("DELETE FROM crl")
+        c.execute("DELETE FROM crls WHERE issuer='platform'")
 
 
 def inject_activation(ven: str, act_id: str) -> None:
@@ -199,16 +204,16 @@ def inject_activation(ven: str, act_id: str) -> None:
 
 
 def forged_crl(number: int) -> str:
-    """A list signed by a self-made key under the CA's own name: valid signature, wrong key."""
+    """A list signed by a self-made key under the issuing CA's own name: valid signature, wrong key."""
     key = ec.generate_private_key(ec.SECP256R1())
-    crl = make_crl(key, root_cert().subject, number,
+    crl = make_crl(key, platform_ca().subject, number,
                    datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1))
     return base64.b64encode(crl.public_bytes(serialization.Encoding.DER)).decode()
 
 
 def main():
     try:
-        print("G1: a fresh user authenticates, and the CRL verifies against the CA root")
+        print("G1: a fresh user authenticates, and the CRL verifies against its issuing CA")
         ukey, upem, ucert, userial = ra_identity(f"user-{secrets.token_hex(3)}")
         requests.post(f"{VPP}/enroll", json={"certificate": upem}, verify=CA_FILE)
         ucf, ukf = write_pair("user", ukey, upem)
@@ -217,18 +222,25 @@ def main():
             else die(f"expected 200, got {r.status_code} {r.text}")
         stale_token, crl = fetch_crl()
         n0 = crl["crl_number"]
-        ok(f"CRL #{n0} signed by the CA, issuer {crl['issuer']}")
+        ok(f"CRL #{n0} signed by the platform issuing CA, issuer {crl['issuer']}")
         ok("the new certificate is not listed") if not listed(crl, userial) \
             else die("fresh certificate already in the CRL")
         r = requests.get(CRL_HTTP, timeout=5)
         plain = x509.load_der_x509_crl(r.content)
         ok(f"the same CRL over plain HTTP, trusted for its signature alone (#{crl_view(plain)['crl_number']})") \
-            if plain.is_signature_valid(root_cert().public_key()) and crl_view(plain)["crl_number"] == n0 \
+            if plain.is_signature_valid(platform_ca().public_key()) and crl_view(plain)["crl_number"] == n0 \
             else die("the CRL served over HTTP does not verify or differs")
         cdp = ucert.extensions.get_extension_for_class(x509.CRLDistributionPoints).value
         url = cdp[0].full_name[0].value
-        ok(f"the certificate names a plain HTTP distribution point ({url})") if url.startswith("http://") \
-            else die(f"distribution point is not plain HTTP: {url}")
+        ok(f"the certificate names its issuer's plain HTTP distribution point ({url})") \
+            if url.startswith("http://") and url.endswith("/platform") \
+            else die(f"distribution point is not the issuer's plain HTTP list: {url}")
+        r = requests.get(f"{CA}/ra/crl/root", verify=CA_FILE)
+        arl = x509.load_der_x509_crl(r.content)
+        ok(f"the root's list of issuing CAs verifies against the root (#{crl_view(arl)['crl_number']}, "
+           f"valid until {arl.next_update_utc.date()})") \
+            if arl.is_signature_valid(root_cert().public_key()) and arl.issuer == root_cert().subject \
+            else die("the root CRL does not verify against the root")
 
         print("G2: only an operator may revoke")
         pkey, ppem, _, _ = ra_identity(f"plain-{secrets.token_hex(3)}")
@@ -295,7 +307,7 @@ def main():
         der = bytearray(base64.b64decode(der_b64))
         der[len(der) // 3] ^= 0x01  # one bit inside the signed TBS
         try:
-            if x509.load_der_x509_crl(bytes(der)).is_signature_valid(root_cert().public_key()):
+            if x509.load_der_x509_crl(bytes(der)).is_signature_valid(platform_ca().public_key()):
                 die("a tampered CRL verified")
             ok("a tampered CRL fails signature verification")
         except ValueError as e:
@@ -379,14 +391,16 @@ def main():
         # The VPP's verifier in-process, pointed at a dead port, holding the list it would have cached.
         sys.path.insert(0, str(ROOT / "vpp-server"))
         from app import revocation  # noqa: E402
-        revocation.CRL_URL, revocation.MAX_AGE = "http://127.0.0.1:1/ra/crl", 0
+        revocation.CRL_BASE, revocation.MAX_AGE = "http://127.0.0.1:1/ra/crl", 0
         key = ec.generate_private_key(ec.SECP256R1())
         now = datetime.datetime.now(datetime.timezone.utc)
-        revocation._crl = make_crl(key, root_cert().subject, 1, now + datetime.timedelta(hours=1))
-        ok("a list still within nextUpdate is served while the CA is down") \
-            if revocation.number(revocation.current()) == 1 \
-            else die("cached list not served")
-        revocation._crl = make_crl(key, root_cert().subject, 1, now - datetime.timedelta(minutes=1))
+        held = {name: make_crl(key, platform_ca().subject, 1, now + datetime.timedelta(hours=1))
+                for name in revocation.ISSUERS}
+        revocation._crls = dict(held)
+        ok("lists still within nextUpdate are served while the CA is down") \
+            if revocation.number(revocation.current()["platform"]) == 1 \
+            else die("cached lists not served")
+        revocation._crls["platform"] = make_crl(key, platform_ca().subject, 1, now - datetime.timedelta(minutes=1))
         try:
             revocation.current()
             die("an expired list was served while the CA is down")

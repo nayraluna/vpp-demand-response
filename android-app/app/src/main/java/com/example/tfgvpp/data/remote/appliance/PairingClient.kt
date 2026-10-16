@@ -88,16 +88,18 @@ class PairingClient(caInput: InputStream, private val registration: Registration
         status: String, owner: String, ownerProof: String,
     ): PairResult {
         val jws = JWSObject.parse(ownerProof)
-        val venCert = CertificateFactory.getInstance("X.509").generateCertificate(
-            jws.header.x509CertChain.first().decode().inputStream()
-        ) as X509Certificate
+        // x5c carries the appliance certificate first, then the device issuing CA.
+        val x5c = jws.header.x509CertChain.map {
+            CertificateFactory.getInstance("X.509").generateCertificate(it.decode().inputStream()) as X509Certificate
+        }
+        val venCert = x5c.first()
 
         val signatureValid = when (val key = venCert.publicKey) {
             is RSAPublicKey -> jws.verify(RSASSAVerifier(key))
             is ECPublicKey -> jws.verify(ECDSAVerifier(key))
             else -> false
         }
-        val chainsToRa = RegistrationClient.validatesToRoot(venCert, caCertificate)
+        val chainsToRa = RegistrationClient.validatesToRoot(x5c, caCertificate)
 
         val claims = jws.payload.toJSONObject()
         val ownerMatches = claims["owner"] == registration.credential.subject

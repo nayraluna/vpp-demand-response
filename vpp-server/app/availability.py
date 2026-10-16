@@ -1,9 +1,3 @@
-import base64
-
-import jwt
-from cryptography import x509
-from cryptography.hazmat.primitives import serialization
-
 from . import crypto_service, revocation
 
 SLOT_MINUTES = 30
@@ -46,25 +40,12 @@ def validate(slots: dict) -> dict:
 def verify_signed(jws_token: str, expected_owner: str) -> dict:
     """Verify an owner-signed calendar and return {"slots", "version"}; the caller checks monotonicity."""
     try:
-        header = jwt.get_unverified_header(jws_token)
-        owner_cert = x509.load_der_x509_certificate(
-            base64.b64decode(header["x5c"][0]))
-    except Exception as e:
-        raise InvalidAvailability(f"calendar is not an owner-signed JWS: {e}")
-    if not crypto_service.issued_by_ca(owner_cert):
-        raise InvalidAvailability("calendar signer not certified by the CA")
-    if not crypto_service.within_validity(owner_cert):
-        raise InvalidAvailability("calendar signer certificate expired or not yet valid")
+        owner_cert, issuer, payload = crypto_service.verify_signer(jws_token)
+    except ValueError as e:
+        raise InvalidAvailability(f"calendar signer {e}")
     # Same subject as the channel is not the same certificate: a superseded one keeps the name.
-    if revocation.is_revoked(owner_cert):
+    if revocation.is_revoked(owner_cert, issuer):
         raise InvalidAvailability("calendar signer certificate is revoked")
-    owner_pub = owner_cert.public_key().public_bytes(
-        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
-    try:
-        # ES256 for Android Keystore EC keys, RS256 for software keys.
-        payload = jwt.decode(jws_token, owner_pub, algorithms=["RS256", "ES256"])
-    except Exception as e:
-        raise InvalidAvailability(f"calendar signature invalid: {e}")
     if owner_cert.subject.rfc4514_string() != expected_owner:
         raise InvalidAvailability("calendar not signed by the appliance's owner")
 

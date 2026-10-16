@@ -30,11 +30,17 @@ def die(msg):
 
 
 def chains_to_ca(cert, ca) -> bool:
-    try:
-        cert.verify_directly_issued_by(ca)
-        return True
-    except Exception:
-        return False
+    """Through an issuing CA to the root: a leaf the root signed directly is not a platform certificate."""
+    issuing = [x509.load_pem_x509_certificate((Path(CA_FILE).parent / f).read_bytes())
+               for f in ("platform-ca.crt", "device-ca.crt")]
+    for issuer in issuing:
+        try:
+            cert.verify_directly_issued_by(issuer)
+            issuer.verify_directly_issued_by(ca)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 def ra_issued_user_cert(cn: str):
@@ -68,9 +74,9 @@ def self_signed(cn: str) -> str:
 
 
 def signed_by_ca(cn: str, days_ago: int = 0):
-    """Minted with the CA key: fixtures the CA itself would refuse to issue."""
-    ca = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
-    ca_key = serialization.load_pem_private_key((Path(CA_FILE).parent / "CA.key").read_bytes(), None)
+    """Minted with the issuing CA's key: fixtures the CA itself would refuse to issue."""
+    ca = x509.load_pem_x509_certificate((Path(CA_FILE).parent / "platform-ca.crt").read_bytes())
+    ca_key = serialization.load_pem_private_key((Path(CA_FILE).parent / "platform-ca.key").read_bytes(), None)
     key = ec.generate_private_key(ec.SECP256R1())
     now = datetime.datetime.now(datetime.timezone.utc)
     cert = (
@@ -88,7 +94,8 @@ def signed_by_ca(cn: str, days_ago: int = 0):
             crl_sign=False, encipher_only=False, decipher_only=False), critical=True)
         .sign(ca_key, hashes.SHA256())
     )
-    return key, cert.public_bytes(serialization.Encoding.PEM).decode()
+    pem = lambda c: c.public_bytes(serialization.Encoding.PEM).decode()
+    return key, pem(cert) + pem(ca)
 
 
 def main():

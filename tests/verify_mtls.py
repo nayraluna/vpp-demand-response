@@ -68,10 +68,10 @@ def self_signed(cn: str):
 
 
 def below_intermediate():
-    """A client certificate under a CA certificate the root really signed. The CA key is read
-    only to mint this fixture: the CA never issues CA:TRUE, which is what pathLen 0 backs up."""
-    root = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
-    root_key = serialization.load_pem_private_key((Path(CA_FILE).parent / "CA.key").read_bytes(), None)
+    """A client certificate under a CA certificate the platform issuing CA really signed. Its key is
+    read only to mint this fixture: an issuing CA never issues CA:TRUE, which is what pathLen 0 backs up."""
+    root = x509.load_pem_x509_certificate((Path(CA_FILE).parent / "platform-ca.crt").read_bytes())
+    root_key = serialization.load_pem_private_key((Path(CA_FILE).parent / "platform-ca.key").read_bytes(), None)
     now = datetime.datetime.now(datetime.timezone.utc)
     ku = dict(content_commitment=False, key_encipherment=False, data_encipherment=False,
               key_agreement=False, encipher_only=False, decipher_only=False)
@@ -140,13 +140,13 @@ def main():
         ok("valid platform cert but no account -> 403") if r.status_code == 403 \
             else die(f"expected 403, got {r.status_code} {r.text}")
 
-        print("G5: a certificate below an intermediate is refused at the handshake (root pathLen 0)")
+        print("G5: a certificate below a third tier is refused at the handshake (issuing CA pathLen 0)")
         ccf, ckf = below_intermediate()
         try:
             r = requests.get(f"{MTLS}/session", cert=(ccf, ckf), verify=CA_FILE)
             die(f"a chain through an intermediate passed the handshake ({r.status_code})")
         except (SSLError, ConnectionError) as e:
-            ok(f"leaf -> intermediate -> root refused by the TLS layer ({type(e).__name__})")
+            ok(f"leaf -> rogue CA -> issuing CA -> root refused by the TLS layer ({type(e).__name__})")
 
         print(f"\nMUTUAL TLS COMPLETE: {passed} checks passed.")
     finally:

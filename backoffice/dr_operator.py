@@ -1,11 +1,9 @@
 import argparse
-import base64
 import json
 import os
 import sys
 from pathlib import Path
 
-import jwt
 import requests
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -14,7 +12,10 @@ from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "vpp-server"))
+sys.path.insert(0, str(ROOT))
 from app import availability as av  # noqa: E402
+from pki import chain as pki_chain  # noqa: E402
+from pki import jws as pki_jws  # noqa: E402
 
 CA_FILE = str(ROOT / "certs" / "CA.crt")
 CA, MTLS = "https://127.0.0.1:8081", "https://127.0.0.1:8443"
@@ -57,12 +58,9 @@ def _hour_to_slot(text: str) -> int:
 def _sign_as_operator(payload: dict, typ: str) -> str:
     """A JWS carrying the operator certificate in x5c, so the CA, which has no client certificates, knows who asks."""
     crt, key = credential()
-    cert = x509.load_pem_x509_certificate(Path(crt).read_bytes())
-    x5c = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode()
+    chain = pki_chain.load_pem_chain(Path(crt).read_bytes())
     private = serialization.load_pem_private_key(Path(key).read_bytes(), password=None)
-    alg = "ES256" if isinstance(private, ec.EllipticCurvePrivateKey) else "RS256"
-    return jwt.encode(payload, private, algorithm=alg,
-                      headers={"x5c": [x5c], "typ": typ})
+    return pki_jws.sign(payload, private, chain, typ)
 
 
 def revoke(serial: str, reason: str) -> None:
@@ -75,13 +73,14 @@ def revoke(serial: str, reason: str) -> None:
     print(f"REVOKED {body['revoked']} ({body['reason']}), CRL number is now {body['crl_number']}")
 
 
-def show_crl() -> None:
-    r = requests.get(f"{CA}/ra/crl", verify=CA_FILE)
+def show_crl(issuer: str = "platform") -> None:
+    r = requests.get(f"{CA}/ra/crl/{issuer}", verify=CA_FILE)
     r.raise_for_status()
-    root = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
+    signer_file = {"root": "CA.crt", "platform": "platform-ca.crt", "device": "device-ca.crt"}[issuer]
+    signer = x509.load_pem_x509_certificate((Path(CA_FILE).parent / signer_file).read_bytes())
     crl = x509.load_der_x509_crl(r.content)
-    if crl.issuer != root.subject or not crl.is_signature_valid(root.public_key()):
-        raise SystemExit("the CRL served is not signed by our CA")
+    if crl.issuer != signer.subject or not crl.is_signature_valid(signer.public_key()):
+        raise SystemExit(f"the {issuer} CRL served is not signed by its CA")
     number = crl.extensions.get_extension_for_class(x509.CRLNumber).value.crl_number
     print(f"CRL #{number} from {crl.issuer.rfc4514_string()}")
     print(f"  thisUpdate {crl.last_update_utc.isoformat()}")
@@ -142,13 +141,14 @@ def main() -> None:
     rv.add_argument("--serial", required=True, help="hex serial of the certificate")
     rv.add_argument("--reason", default="unspecified",
                     help="keyCompromise, cACompromise, affiliationChanged, superseded, cessationOfOperation, privilegeWithdrawn")
-    sub.add_parser("crl", help="fetch and print the current revocation list")
+    c = sub.add_parser("crl", help="fetch and print a current revocation list")
+    c.add_argument("--issuer", default="platform", choices=("platform", "device", "root"))
 
     args = parser.parse_args()
     if args.command == "revoke":
         return revoke(args.serial, args.reason)
     if args.command == "crl":
-        return show_crl()
+        return show_crl(args.issuer)
     if args.command == "renew":
         crt, _ = renew()
         subject = x509.load_pem_x509_certificate(

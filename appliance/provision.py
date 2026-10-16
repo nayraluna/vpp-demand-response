@@ -1,19 +1,24 @@
 """Factory step of an appliance: the key is generated in the HSM, only the CSR leaves it.
 
     python provision.py request [--ven ven-0001] [--power 2000] [--algo rsa|ec]
-    python provision.py install <signed.crt> <root.crt>
+    python provision.py install <signed.crt> <root.crt> <platform-ca.crt>
+
+The device leaves the factory with its certificate, the root as its only trust anchor,
+and the platform issuing certificate it will meet in every owner's credential.
 """
 import argparse
-import os
 import shutil
+import sys
 from pathlib import Path
 
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import NameOID
 
-HSM = Path(__file__).resolve().parent.parent / "certs"
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR))
+from pki import identity  # noqa: E402
+
+HSM = ROOT_DIR / "certs"
 
 
 def subject_for(ven: str, power: int) -> x509.Name:
@@ -26,35 +31,17 @@ def subject_for(ven: str, power: int) -> x509.Name:
     ])
 
 
-def write_key(path, key) -> None:
-    """Created 0600 from the start where the platform honours it (the Pi does, Windows does not)."""
-    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                            serialization.NoEncryption())
-    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as f:
-        f.write(pem)
-
-
-def request(ven: str, power: int, algo: str) -> None:
-    key = (ec.generate_private_key(ec.SECP256R1()) if algo == "ec"
-           else rsa.generate_private_key(public_exponent=65537, key_size=2048))
-    subject = subject_for(ven, power)
-    csr = x509.CertificateSigningRequestBuilder().subject_name(subject).sign(key, hashes.SHA256())
-    write_key(HSM / "VEN.key", key)
-    (HSM / "VEN.csr").write_bytes(csr.public_bytes(serialization.Encoding.PEM))
-    print(f"appliance: key generated in the HSM, CSR for {subject.rfc4514_string()} at {HSM / 'VEN.csr'}")
-
-
-def install(cert: Path, root: Path) -> None:
-    issued = x509.load_pem_x509_certificate(cert.read_bytes())
+def install(cert: Path, root: Path, platform_ca: Path) -> None:
     anchor = x509.load_pem_x509_certificate(root.read_bytes())
-    if issued.issuer != anchor.subject:
-        raise SystemExit("certificate was not issued by the root being installed")
-    if cert.resolve() != (HSM / "VEN.crt").resolve():
-        shutil.copyfile(cert, HSM / "VEN.crt")
-    if root.resolve() != (HSM / "CA.crt").resolve():
-        shutil.copyfile(root, HSM / "CA.crt")
-    print(f"appliance: certificate {issued.subject.rfc4514_string()} and factory root "
-          f"{anchor.subject.rfc4514_string()} installed")
+    issued = identity.install(cert, HSM / "VEN.crt")
+    issuing = x509.load_pem_x509_certificate(platform_ca.read_bytes())
+    if issued.issuer == anchor.subject or issuing.issuer != anchor.subject:
+        raise SystemExit("the certificate and the platform issuing CA must both sit under the root being installed")
+    for src, dest in ((root, HSM / "CA.crt"), (platform_ca, HSM / "platform-ca.crt")):
+        if src.resolve() != dest.resolve():
+            shutil.copyfile(src, dest)
+    print(f"appliance: certificate {issued.subject.rfc4514_string()}, factory root "
+          f"{anchor.subject.rfc4514_string()} and the platform issuing CA installed")
 
 
 def main() -> None:
@@ -67,12 +54,15 @@ def main() -> None:
     i = sub.add_parser("install")
     i.add_argument("cert", type=Path)
     i.add_argument("root", type=Path)
+    i.add_argument("platform_ca", type=Path)
     args = ap.parse_args()
     HSM.mkdir(exist_ok=True)
     if args.cmd == "request":
-        request(args.ven, args.power, args.algo)
+        subject = subject_for(args.ven, args.power)
+        csr = identity.request(HSM, "VEN", subject, args.algo)
+        print(f"appliance: key generated in the HSM, CSR for {subject.rfc4514_string()} at {csr}")
     else:
-        install(args.cert, args.root)
+        install(args.cert, args.root, args.platform_ca)
 
 
 if __name__ == "__main__":

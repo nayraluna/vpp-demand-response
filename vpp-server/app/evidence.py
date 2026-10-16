@@ -1,9 +1,3 @@
-import base64
-
-import jwt
-from cryptography import x509
-from cryptography.hazmat.primitives import serialization
-
 from . import crypto_service, db, revocation
 
 
@@ -18,30 +12,12 @@ class DuplicateEvidence(Exception):
 def verify(jws_token: str, submitter_subject: str) -> dict:
     """Verify the evidence and return its fields; `submitter_subject` is the mTLS identity."""
     try:
-        header = jwt.get_unverified_header(jws_token)
-    except Exception as e:
-        raise InvalidEvidence(f"not a JWS: {e}")
-    x5c = header.get("x5c")
-    if not x5c:
-        raise InvalidEvidence("evidence carries no appliance certificate (x5c)")
-    ven_cert = x509.load_der_x509_certificate(base64.b64decode(x5c[0]))
-
-    if not crypto_service.issued_by_ca(ven_cert):
-        raise InvalidEvidence("appliance certificate not issued by the CA")
-    if not crypto_service.within_validity(ven_cert):
-        raise InvalidEvidence("appliance certificate expired or not yet valid")
+        ven_cert, issuer, payload = crypto_service.verify_signer(jws_token)
+    except ValueError as e:
+        raise InvalidEvidence(f"appliance certificate {e}")
     # Same subject as the channel is not the same certificate: a superseded one keeps the name.
-    if revocation.is_revoked(ven_cert):
+    if revocation.is_revoked(ven_cert, issuer):
         raise InvalidEvidence("appliance certificate is revoked")
-
-    ven_pub = ven_cert.public_key().public_bytes(
-        serialization.Encoding.PEM,
-        serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
-    try:
-        payload = jwt.decode(jws_token, ven_pub, algorithms=["RS256", "ES256"])
-    except Exception as e:
-        raise InvalidEvidence(f"appliance signature invalid: {e}")
 
     ven_subject = ven_cert.subject.rfc4514_string()
     if ven_subject != submitter_subject:

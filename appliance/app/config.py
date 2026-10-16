@@ -16,9 +16,12 @@ FACTORY_DEFAULTS = {
     "registration": None,       # VTN ids and poll period
     "availability": None,       # owner-signed weekly calendar
     "availability_version": 0,  # monotonic
-    "crl_number": 0,            # monotonic
-    "crl_next_update": None,    # list expiry
-    "crl_revoked": [],          # serials
+    "crl_number": 0,            # platform CA's list: monotonic
+    "crl_next_update": None,    # its expiry, what gates acting
+    "crl_revoked": [],          # its serials, where the owner is looked up
+    "arl_number": 0,            # root's list of revoked issuing CAs
+    "arl_next_update": None,
+    "arl_revoked": [],
     "processed": {},            # activation id -> its expiry, replay protection
     "last_activation": None,
     "history": [],              # executed, pending evidence

@@ -1,6 +1,3 @@
-import base64
-
-import jwt
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import NameOID
@@ -30,30 +27,12 @@ def certified_nominal_power(certificate: x509.Certificate) -> int:
 def verify(jws_token: str, authenticated_user: str) -> dict:
     """Verify the proof and return the binding; `authenticated_user` is the mTLS identity."""
     try:
-        header = jwt.get_unverified_header(jws_token)
-    except Exception as e:
-        raise InvalidOwnerProof(f"not a JWS: {e}")
-    x5c = header.get("x5c")
-    if not x5c:
-        raise InvalidOwnerProof("owner proof carries no appliance certificate (x5c)")
-    ven_cert = x509.load_der_x509_certificate(base64.b64decode(x5c[0]))
-
-    if not crypto_service.issued_by_ca(ven_cert):
-        raise InvalidOwnerProof("appliance certificate not issued by the CA")
-    if not crypto_service.within_validity(ven_cert):
-        raise InvalidOwnerProof("appliance certificate expired or not yet valid")
+        ven_cert, issuer, payload = crypto_service.verify_signer(jws_token)
+    except ValueError as e:
+        raise InvalidOwnerProof(f"appliance certificate {e}")
     # The user forwards this proof, so the appliance's certificate never crossed the mTLS door.
-    if revocation.is_revoked(ven_cert):
+    if revocation.is_revoked(ven_cert, issuer):
         raise InvalidOwnerProof("appliance certificate is revoked")
-
-    ven_pub = ven_cert.public_key().public_bytes(
-        serialization.Encoding.PEM,
-        serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
-    try:
-        payload = jwt.decode(jws_token, ven_pub, algorithms=["RS256", "ES256"])
-    except Exception as e:
-        raise InvalidOwnerProof(f"appliance signature invalid: {e}")
 
     certified_power = certified_nominal_power(ven_cert)
     if payload.get("P") != certified_power:

@@ -50,12 +50,18 @@ def raw_verify(pub, sig, msg):
         pub.verify(sig, msg, padding.PKCS1v15(), hashes.SHA256())
 
 
-def chains_to_ca(cert: x509.Certificate, ca: x509.Certificate) -> bool:
-    try:
-        cert.verify_directly_issued_by(ca)
-        return True
-    except Exception:
-        return False
+def chains_to_ca(cert, ca) -> bool:
+    """Through an issuing CA to the root: a leaf the root signed directly is not a platform certificate."""
+    issuing = [x509.load_pem_x509_certificate((Path(CA_FILE).parent / f).read_bytes())
+               for f in ("platform-ca.crt", "device-ca.crt")]
+    for issuer in issuing:
+        try:
+            cert.verify_directly_issued_by(issuer)
+            issuer.verify_directly_issued_by(ca)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 def main():
@@ -63,15 +69,35 @@ def main():
 
     print("G1: PKI chain")
     bc = ca.extensions.get_extension_for_class(x509.BasicConstraints)
-    ok("root is CA:TRUE with pathLen 0, critical: no CA may sit below it") \
-        if bc.critical and bc.value.ca and bc.value.path_length == 0 \
+    ok("root is CA:TRUE with pathLen 1, critical: issuing CAs below it, nothing below them") \
+        if bc.critical and bc.value.ca and bc.value.path_length == 1 \
         else die(f"root BasicConstraints {bc.value} critical={bc.critical}")
-    for name in ["vpp", "server", "VEN"]:
-        cert = x509.load_pem_x509_certificate((CERTS / f"{name}.crt").read_bytes())
-        if chains_to_ca(cert, ca):
-            ok(f"{name}.crt issued by the CA ({cert.subject.rfc4514_string()})")
+    for name in ("platform-ca", "device-ca"):
+        issuing = x509.load_pem_x509_certificate((CERTS / f"{name}.crt").read_bytes())
+        ibc = issuing.extensions.get_extension_for_class(x509.BasicConstraints)
+        try:
+            issuing.verify_directly_issued_by(ca)
+            signed = True
+        except Exception:
+            signed = False
+        ok(f"{name}.crt is an issuing CA signed by the root, pathLen 0 ({issuing.subject.rfc4514_string()})") \
+            if signed and ibc.critical and ibc.value.ca and ibc.value.path_length == 0 \
+            else die(f"{name}.crt is not a pathLen 0 issuing CA under the root")
+    for name, issuer in (("vpp", "platform-ca"), ("server", "platform-ca"), ("VEN", "device-ca")):
+        chain = x509.load_pem_x509_certificates((CERTS / f"{name}.crt").read_bytes())
+        cert = chain[0]
+        expected = x509.load_pem_x509_certificate((CERTS / f"{issuer}.crt").read_bytes())
+        if chains_to_ca(cert, ca) and cert.issuer == expected.subject and len(chain) == 2:
+            ok(f"{name}.crt issued by the {issuer.split('-')[0]} CA, chain shipped with the leaf ({cert.subject.rfc4514_string()})")
         else:
-            die(f"{name}.crt does NOT chain to the CA")
+            die(f"{name}.crt does NOT chain to the root through the {issuer}")
+    try:
+        root_crl = x509.load_der_x509_crl((CERTS / "root.crl").read_bytes())
+        ok(f"root CRL published offline, signed by the root, valid until {root_crl.next_update_utc.date()}") \
+            if root_crl.is_signature_valid(ca.public_key()) and root_crl.issuer == ca.subject \
+            else die("root.crl does not verify against the root")
+    except FileNotFoundError:
+        die("no root.crl: the root never published its list")
 
     print("G2: VPP over TLS")
     r = requests.get(f"{VPP}/ping", verify=CA_FILE)
@@ -109,6 +135,11 @@ def main():
         ok("RA distributes the correct trust anchor (CA.crt)")
     else:
         die("RA served a different CA certificate")
+    ok(f"RA distributes the issuing certificates too ({', '.join(sorted(r.json()['issuing']))})") \
+        if set(r.json().get("issuing", {})) == {"platform", "device"} \
+        else die(f"issuing certificates missing from /ra/certificate: {r.json().keys()}")
+    r = requests.get("http://127.0.0.1:8084/ping", timeout=3)
+    ok("the CA process answers on loopback only (:8084), apart from the RA") if r.ok else die("CA process down")
 
     print("G4: Appliance (VEN) identity")
     hsm.initialize()

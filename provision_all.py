@@ -37,7 +37,7 @@ def main() -> None:
     san = ",".join([BASE_SAN, *extra])
     CERTS.mkdir(exist_ok=True)
 
-    # Create the root CA and TLS certificate.
+    # The root, offline: it certifies the two issuing CAs and publishes its CRL.
     run("ca/make_root.py", "--algo", args.algo, "--san", ",".join(extra))
 
     # Generate and sign the VPP server certificate.
@@ -46,22 +46,24 @@ def main() -> None:
         "ca/sign_csr.py",
         "--csr", "certs/vpp.csr",
         "--out", "certs/vpp.crt",
+        "--issuer", "platform",
         "--profile", "tls-server+signing",
         "--san", san,
     )
     run("vpp-server/provision.py", "install", "certs/vpp.crt")
 
-    # Generate and sign the appliance certificate.
+    # The appliance, at the factory: certified by the device issuing CA, shipped with the root.
     run("appliance/provision.py", "request", "--algo", args.algo)
     run(
         "ca/sign_csr.py",
         "--csr", "certs/VEN.csr",
         "--out", "certs/VEN.crt",
+        "--issuer", "device",
         "--profile", "client",
     )
     run(
         "appliance/provision.py",
-        "install", "certs/VEN.crt", "certs/CA.crt",
+        "install", "certs/VEN.crt", "certs/CA.crt", "certs/platform-ca.crt",
     )
 
     # Generate and sign the backoffice operator certificate.
@@ -70,6 +72,7 @@ def main() -> None:
         "ca/sign_csr.py",
         "--csr", "backoffice/operator.csr",
         "--out", "backoffice/operator.crt",
+        "--issuer", "platform",
         "--profile", "client",
     )
     run("backoffice/provision.py", "install", "backoffice/operator.crt")
@@ -87,7 +90,7 @@ def main() -> None:
         (CERTS / stale).unlink(missing_ok=True)
 
     # Display the subjects of the generated certificates.
-    for name in ("CA.crt", "server.crt", "vpp.crt", "VEN.crt"):
+    for name in ("CA.crt", "platform-ca.crt", "device-ca.crt", "server.crt", "vpp.crt", "VEN.crt"):
         subprocess.run(
             [
                 PY,

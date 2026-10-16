@@ -2,7 +2,7 @@
 # Single source for the port list, the certificate paths and the venv lookup,
 # so a change to any of them cannot land in one script and miss another.
 
-$Ports = 8080, 8081, 8082, 8083, 8443
+$Ports = 8080, 8081, 8082, 8083, 8084, 8443
 
 function Find-Python($root) {
     $venv = "$root\.venv\Scripts\python.exe"
@@ -22,6 +22,8 @@ function Start-Services($py, $root) {
     $uvicorn = @("-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port")
     $tls13 = @("../serve_tls.py", "app.main:app")   # same app, TLS 1.3 only
     @(
+        # The CA holds the issuing keys and listens on loopback only; the RA in front of it holds none.
+        Start-Process $py -PassThru -WindowStyle Hidden -WorkingDirectory "$root\ca" -ArgumentList @("-m", "uvicorn", "app.ca_main:app", "--host", "127.0.0.1", "--port", "8084")
         Start-Process $py -PassThru -WindowStyle Hidden -WorkingDirectory "$root\ca" -ArgumentList ($tls13 + @("8081", "../certs/server.crt", "../certs/server.key"))
         Start-Process $py -PassThru -WindowStyle Hidden -WorkingDirectory "$root\vpp-server"   -ArgumentList ($tls13 + @("8080", "../certs/vpp.crt", "../certs/vpp.key"))
         Start-Process $py -PassThru -WindowStyle Hidden -WorkingDirectory "$root\vpp-server"   -ArgumentList @("mtls_server.py")

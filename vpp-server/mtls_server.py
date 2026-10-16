@@ -203,11 +203,11 @@ class Handler(BaseHTTPRequestHandler):
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         for activation in pending:
             db.mark_delivered(activation["activation_id"], now)
-        # Calendar and CRL ride along verbatim: the appliance verifies both itself.
+        # Calendar and CRLs ride along verbatim: the appliance verifies them itself.
         declared = db.get_availability(ven_subject)
         return self._json(200, {"ven": ven_subject, "activations": pending,
                                 "calendar": declared.get("jws") if declared else None,
-                                "crl": db.get_crl()})
+                                "crls": revocation.relay_copies()})
 
     def _dr_activate(self, cert, subject: str, body: dict):
         """Issue activations to the selected appliances; the random id is what the evidence must name."""
@@ -317,13 +317,18 @@ def main():
     crypto_service.initialize()
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+    # vpp.crt carries the issuing CA too, so the handshake sends the chain a client needs.
     ctx.load_cert_chain(str(CERTS / "vpp.crt"), str(CERTS / "vpp.key"))
+    # The root is the anchor. The issuing certificates let OpenSSL complete the path of a
+    # client that presents its leaf alone; without the self-signed root they vouch for nothing.
     ctx.load_verify_locations(str(CERTS / "CA.crt"))
+    for issuing in ("platform-ca.crt", "device-ca.crt"):
+        ctx.load_verify_locations(str(CERTS / issuing))
     ctx.verify_mode = ssl.CERT_REQUIRED
     httpd = QuietServer((HOST, PORT), Handler)
     httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
     print(f"[vpp-mtls] mutual-TLS session endpoint on https://{HOST}:{PORT} "
-          f"(CERT_REQUIRED, trust anchor = RA/CA.crt)")
+          f"(CERT_REQUIRED, trust anchor = certs/CA.crt)")
     httpd.serve_forever()
 
 

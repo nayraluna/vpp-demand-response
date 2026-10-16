@@ -28,11 +28,17 @@ def die(msg):
 
 
 def chains_to_ca(cert, ca) -> bool:
-    try:
-        cert.verify_directly_issued_by(ca)
-        return True
-    except Exception:
-        return False
+    """Through an issuing CA to the root: a leaf the root signed directly is not a platform certificate."""
+    issuing = [x509.load_pem_x509_certificate((Path(CA_FILE).parent / f).read_bytes())
+               for f in ("platform-ca.crt", "device-ca.crt")]
+    for issuer in issuing:
+        try:
+            cert.verify_directly_issued_by(issuer)
+            issuer.verify_directly_issued_by(ca)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 def spki(public_key) -> bytes:
@@ -128,14 +134,18 @@ def main():
 
     print("G5: the RA validates, the CA signs")
     ra_source = (ROOT / "ca" / "app" / "ra_service.py").read_text(encoding="utf-8")
-    ok("the RA module never opens the CA key (no CA.key, no private key loader)") \
-        if "CA.key" not in ra_source and "load_pem_private_key" not in ra_source \
-        and "CA_KEY" not in ra_source \
-        else die("ra_service.py touches the CA key")
-    ok("only ca_service.py signs certificates and the CRL") \
-        if ".sign(_ca_key" not in ra_source \
-        and (ROOT / "ca" / "app" / "ca_service.py").read_text(encoding="utf-8").count(".sign(_ca_key") == 2 \
+    ca_source = (ROOT / "ca" / "app" / "ca_service.py").read_text(encoding="utf-8")
+    ok("the RA module never opens a CA key (no key file, no private key loader)") \
+        if ".key" not in ra_source and "load_pem_private_key" not in ra_source \
+        and "load_key" not in ra_source \
+        else die("ra_service.py touches a CA key")
+    ok("only ca_service.py signs certificates and CRLs") \
+        if "hashes.SHA256" not in ra_source and ca_source.count(".sign(self._key") == 1 \
+        and ca_source.count(".sign(key") == 1 \
         else die("signing happens outside ca_service.py")
+    ok("the CA process listens on loopback only") \
+        if '"--host", "127.0.0.1", "--port", "8084"' in (ROOT / "_services.ps1").read_text(encoding="utf-8") \
+        else die("the CA process is not bound to loopback")
 
     print(f"\nCERTIFICATE ISSUANCE COMPLETE: {passed} checks passed.")
 

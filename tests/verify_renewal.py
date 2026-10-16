@@ -84,12 +84,12 @@ def renew(key, cert_pem: str, new_key, subject: x509.Name):
 
 
 def fetch_crl() -> x509.CertificateRevocationList:
-    r = requests.get(f"{CA}/ra/crl", verify=CA_FILE)
+    r = requests.get(f"{CA}/ra/crl/platform", verify=CA_FILE)
     r.raise_for_status()
-    root = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
+    signer = x509.load_pem_x509_certificate((Path(CA_FILE).parent / "platform-ca.crt").read_bytes())
     crl = x509.load_der_x509_crl(r.content)
-    if crl.issuer != root.subject or not crl.is_signature_valid(root.public_key()):
-        die("the CRL served is not signed by the CA")
+    if crl.issuer != signer.subject or not crl.is_signature_valid(signer.public_key()):
+        die("the CRL served is not signed by the platform issuing CA")
     return crl
 
 

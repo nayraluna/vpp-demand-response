@@ -92,30 +92,27 @@ class RegistrationClient(caInput: InputStream) {
         ).build(JcaContentSignerBuilder(csrAlgorithm).build(keyPair.private))
         val csrPem = toPem("CERTIFICATE REQUEST", csr.encoded)
 
+        // The RA answers with the leaf and its issuing CA; the leaf comes first.
         val issue = postJson("$raUrl/ra/issue", mapOf("csr" to csrPem))
         val certPem = issue["certificate"] as String
-        val userCert = CertificateFactory.getInstance("X.509")
-            .generateCertificate(certPem.byteInputStream()) as X509Certificate
-        val credential = UserCredential(keyPair.private, userCert, certPem)
+        val userChain = parseChain(certPem)
+        val credential = UserCredential(keyPair.private, userChain.first(), certPem)
 
         // Cert_VPP is kept: the pairing bundle delivers it to the appliance.
         val enroll = postJson("$vppUrl/enroll", mapOf("certificate" to certPem))
         val vppCertPem = enroll["vpp_certificate"] as String
-        val vppCert = CertificateFactory.getInstance("X.509")
-            .generateCertificate(vppCertPem.byteInputStream()) as X509Certificate
+        val vppChain = parseChain(vppCertPem)
 
         return Registration(
             credential = credential,
             subject = credential.subject,
             raSerial = issue["serial"] as? String ?: "?",
-            userCertChainsToRa = chainsToRa(userCert),
+            userCertChainsToRa = validatesToRoot(userChain, caCertificate),
             enrollStatus = enroll["status"] as String,
             vppCertificatePem = vppCertPem,
-            vppCertChainsToRa = chainsToRa(vppCert),
+            vppCertChainsToRa = validatesToRoot(vppChain, caCertificate),
         )
     }
-
-    private fun chainsToRa(cert: X509Certificate): Boolean = validatesToRoot(cert, caCertificate)
 
     private fun postJson(url: String, body: Map<String, Any>): Map<String, Any> {
         val req = Request.Builder().url(url)
@@ -136,15 +133,24 @@ class RegistrationClient(caInput: InputStream) {
             .build()
 
         /** PKIX path validation to the platform root, as the app already does for the DNIe: issuer
-         *  name, signature, validity and the standard extension checks. Revocation is not checked yet. */
-        fun validatesToRoot(cert: X509Certificate, root: X509Certificate): Boolean = try {
+         *  name, signature, validity and the standard extension checks, over the leaf and the issuing
+         *  CA the artefact carries. The root is the only anchor. Revocation is not checked yet. */
+        fun validatesToRoot(chain: List<X509Certificate>, root: X509Certificate): Boolean = try {
             val params = PKIXParameters(setOf(TrustAnchor(root, null))).apply { isRevocationEnabled = false }
+            // A path never includes the anchor itself, and the leaf must come first.
+            val path = chain.filterNot { it.subjectX500Principal == root.subjectX500Principal }
             CertPathValidator.getInstance("PKIX")
-                .validate(CertificateFactory.getInstance("X.509").generateCertPath(listOf(cert)), params)
+                .validate(CertificateFactory.getInstance("X.509").generateCertPath(path), params)
             true
         } catch (e: Exception) {
             false
         }
+
+        /** Every certificate in a PEM bundle, in file order: the leaf, then its issuing CA. */
+        fun parseChain(pem: String): List<X509Certificate> =
+            CertificateFactory.getInstance("X.509")
+                .generateCertificates(pem.byteInputStream())
+                .map { it as X509Certificate }
 
         /** OkHttp client that trusts ONLY the platform CA root (the only trust anchor everywhere). */
         fun buildServerAuthClient(caCertificate: X509Certificate): OkHttpClient {

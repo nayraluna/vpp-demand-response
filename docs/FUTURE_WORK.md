@@ -7,17 +7,16 @@ the fix. Grouped by area, the PKI first.
 
 ## PKI
 
-### The RA and the CA share a process, and the root key is online
-`ca/app/ra_service.py` validates every request and holds no key, and
-`ca/app/ca_service.py` is the only module that loads `certs/CA.key`, signs
-leaves and the CRL, and writes the register. They still run in one process on
-the internet facing host, so a compromise of that host reaches the key, and the
-root is a PEM file beside the leaves.
+### The issuing keys are PEM files, and the RA reaches the CA over plain loopback
+The hierarchy is in place: an offline root (`certs/CA.key`, used only by
+`ca/make_root.py` and `ca/revoke_issuer.py`), a platform issuing CA and a
+device issuing CA, each with its own register and CRL, and an RA process on
+:8081 that holds no key and asks the CA process on 127.0.0.1:8084 to sign.
+What remains is operational: the issuing keys are files on the same host as
+the RA, and the RA to CA channel is plain HTTP trusted by being loopback.
 
-Production: offline root, an issuing CA per trust domain with its key in an
-HSM, and the RA as a separate host that reaches the platform issuing CA over a
-private channel. The module boundary is already the one that split would cut
-along. Large.
+Production: the issuing keys in an HSM, the CA process on its own host, and
+mutual TLS between the RA and the CA so the CA signs only for its RA. Medium.
 
 ### Issuance verifies possession, not identity
 `/ra/issue` accepts any well formed CSR whose self signature verifies, whose
@@ -147,7 +146,8 @@ same root verifies. Anchors are copied out of band into the APK, the Pi and the
 operator, and regenerating the root invalidates everything.
 
 Standard: a new root cross-signed by the old one and a window where verifiers
-hold both. The appliance holds one `CA.crt`. Large.
+hold both. The appliance holds one `CA.crt` and one `platform-ca.crt`, and
+cannot yet receive a rotated issuing certificate through its poll. Large.
 
 ### VPP certificate is dual use
 `vpp.crt` carries serverAuth and digitalSignature at once, one certificate per
@@ -158,7 +158,7 @@ identity so the two keys can be rotated and protected independently.
 ### TLS SANs are development addresses
 The server certificates list `localhost`, `127.0.0.1`, the Android emulator
 address `10.0.2.2` and any IP passed in `EXTRA_SAN_IPS`, and the CRL
-distribution point is `TFG_CRL_URL`. Production certificates would carry the
+distribution point is `TFG_CRL_BASE`. Production certificates would carry the
 real DNS names of the services and nothing else.
 
 ### HSM is emulated
@@ -251,6 +251,16 @@ One physical appliance, with fleet behaviour exercised through a synthetic
 population of 20 users and 40 appliances.
 
 ## Resolved since the thesis
+
+- The PKI is a hierarchy: an offline root with pathLen 1 certifies a platform
+  issuing CA and a device issuing CA, both pathLen 0. Leaves carry their issuing
+  CA with them, every verifier holds the root alone and builds the two-step
+  path with `pki/chain.py`, each issuer publishes its own CRL and the root
+  publishes the list that revokes an issuing CA. The RA is its own process and
+  holds no key.
+- The RA and the CA are separate modules, then separate processes:
+  `ra_service` validates, `ca_service` signs, and a gate checks that the RA
+  module never opens a key.
 
 - The operator credential is provisioned at setup like the VPP and the
   appliance: `backoffice/provision.py` generates the key, the CA host signs the

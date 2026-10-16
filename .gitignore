@@ -16,6 +16,7 @@
 *.der
 *.crt
 *.cer
+*.crl
 certs/*.ext
 .env
 .env.*

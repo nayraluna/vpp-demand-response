@@ -35,10 +35,11 @@ def enroll(req: EnrollRequest) -> dict:
         cert = x509.load_pem_x509_certificate(req.certificate.encode())
     except Exception:
         raise HTTPException(status_code=400, detail="invalid certificate PEM")
-    if not crypto_service.issued_by_ca(cert):
-        raise HTTPException(status_code=403, detail="certificate not issued by the CA")
+    # Validity first: the chain check also fails on an expired leaf, and the reason should say so.
     if not crypto_service.within_validity(cert):
         raise HTTPException(status_code=403, detail="certificate expired or not yet valid")
+    if not crypto_service.issued_by_ca(cert):
+        raise HTTPException(status_code=403, detail="certificate not issued by the CA")
     try:
         if revocation.is_revoked(cert):
             raise HTTPException(status_code=403, detail="certificate revoked")
