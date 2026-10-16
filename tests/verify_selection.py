@@ -122,6 +122,14 @@ def reset_operational_state():
         c.execute("DELETE FROM users WHERE subject LIKE 'CN=syn-user-%'")
 
 
+def fresh(payload: dict, ttl: int | None = None) -> dict:
+    """What every real client stamps: when it signed, a unique id, and for a one-shot request its expiry."""
+    now = int(time.time())
+    out = {**payload, "iat": now, "jti": secrets.token_hex(8)}
+    if ttl:
+        out["exp"] = now + ttl
+    return out
+
 def ra_identity(name: str, org_unit: str | None = None):
     key = ec.generate_private_key(ec.SECP256R1())
     attrs = [x509.NameAttribute(NameOID.COMMON_NAME, name)]
@@ -151,8 +159,9 @@ def bind_and_declare(key, cert_pem, client, calendar) -> str:
     key_pem = key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption())
-    token = jwt.encode({"vpp_mtls_url": MTLS,
-                        "cert_vpp": (CERTS / "vpp.crt").read_text()},
+    token = jwt.encode(fresh({"vpp_mtls_url": MTLS,
+                              "cert_vpp": (CERTS / "vpp.crt").read_text(),
+                              "ven": requests.get(f"{APP}/ping").json()["ven"]}, 300),
                        key_pem, algorithm="ES256",
                        headers={"x5c": [x5c], "typ": "application/pairing+json"})
     proof = requests.post(f"{APP}/pair", json={"jws": token}).json()["owner_proof"]

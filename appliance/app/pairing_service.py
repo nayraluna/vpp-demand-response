@@ -46,9 +46,15 @@ def pair(jws_token: str) -> dict:
         raise InvalidBundle("bundle has no owner certificate (x5c)")
     owner = certs[0]
     try:
-        payload = pki_jws.decode_with(jws_token, owner)
+        # A bundle is a one-shot request: typed, short-lived, and addressed to this appliance,
+        # so a captured one cannot be replayed to a reset device or carried to another.
+        payload = pki_jws.decode_with(jws_token, owner, typ=pki_jws.TYP_PAIRING, require_exp=True)
+    except pki_jws.WrongType as e:
+        raise InvalidBundle(str(e))
     except Exception as e:
-        raise InvalidBundle(f"owner signature invalid: {e}")
+        raise InvalidBundle(f"owner signature invalid or bundle expired: {e}")
+    if payload.get("ven") != hsm.subject():
+        raise InvalidBundle("bundle is not addressed to this appliance")
 
     # Any cert_ra in the bundle is ignored: a root received over the channel it protects
     # would let anyone on the LAN enrol an unpaired appliance into a VPP of their own.
@@ -85,12 +91,13 @@ def pair(jws_token: str) -> dict:
         "max": cfg["max"],
         "rec": cfg["rec"],
     }
+    # Ten minutes: the application forwards it at once, and a captured proof must not bind later.
     owner_proof = hsm.sign_jws({
         "ven": hsm.subject(),
         "owner": owner_subject,
         **parameters,
         "paired_at": now,
-    })
+    }, ttl_seconds=600)
     return {
         "state": cfg["state"],
         "owner": owner_subject,

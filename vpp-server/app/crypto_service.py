@@ -87,12 +87,13 @@ def jws_algorithm(key) -> str:
 
 def sign_jws(payload: dict) -> str:
     """Compact JWS carrying the VPP certificate chain in x5c so the verifier can chain it to the root."""
-    return pki_jws.sign(payload, _private_key, _chain, "application/dr-event+json")
+    return pki_jws.sign(payload, _private_key, _chain, pki_jws.TYP_DR_EVENT)
 
 
-def verify_signer(token: str) -> tuple[x509.Certificate, x509.Certificate, dict]:
+def verify_signer(token: str, typ: str, require_exp: bool = False) -> tuple[x509.Certificate, x509.Certificate, dict]:
     """Shared path of every artefact verifier: the signer from x5c, its chain to the root, the payload.
 
+    The token must be of the expected type, and a one-shot one must carry its expiry.
     Returns (signer, issuing CA, payload). Raises ValueError with the reason to refuse.
     """
     try:
@@ -106,7 +107,9 @@ def verify_signer(token: str) -> tuple[x509.Certificate, x509.Certificate, dict]
     if not within_validity(signer):
         raise ValueError("certificate expired or not yet valid")
     try:
-        payload = pki_jws.decode_with(token, signer)
+        payload = pki_jws.decode_with(token, signer, typ=typ, require_exp=require_exp)
+    except pki_jws.WrongType as e:
+        raise ValueError(str(e))
     except Exception as e:
-        raise ValueError(f"signature invalid: {e}")
+        raise ValueError(f"signature invalid or token expired: {e}")
     return signer, issuer, payload

@@ -121,6 +121,14 @@ def ra_identity(name):
     return key, cert_pem, (str(cf), str(kf))
 
 
+def fresh(payload: dict, ttl: int | None = None) -> dict:
+    """What every real client stamps: when it signed, a unique id, and for a one-shot request its expiry."""
+    now = int(time.time())
+    out = {**payload, "iat": now, "jti": secrets.token_hex(8)}
+    if ttl:
+        out["exp"] = now + ttl
+    return out
+
 def sign_as(key, cert_pem, payload, typ):
     cert = x509.load_pem_x509_certificate(cert_pem.encode())
     x5c = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode()
@@ -174,9 +182,10 @@ def main():
     record("ra_issue", issue_ms)
     record("enroll", enroll_ms)
 
-    bundle = sign_as(key, cert_pem, {
+    bundle = sign_as(key, cert_pem, fresh({
         "vpp_mtls_url": MTLS,
-        "cert_vpp": (CERTS / "vpp.crt").read_text()}, "application/pairing+json")
+        "cert_vpp": (CERTS / "vpp.crt").read_text(),
+        "ven": requests.get(f"{APP}/ping").json()["ven"]}, 300), "application/pairing+json")
 
     print(f"== phase 1: onboarding, {SAMPLES} samples ==")
     pair_ms, proof_ms = [], []

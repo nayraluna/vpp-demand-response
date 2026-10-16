@@ -40,9 +40,9 @@ def validate(slots: dict) -> dict:
 def verify_signed(jws_token: str, expected_owner: str) -> dict:
     """Verify an owner-signed calendar and return {"slots", "version"}; the caller checks monotonicity."""
     try:
-        owner_cert, issuer, payload = crypto_service.verify_signer(jws_token)
+        owner_cert, issuer, payload = crypto_service.verify_signer(jws_token, crypto_service.pki_jws.TYP_AVAILABILITY)
     except ValueError as e:
-        raise InvalidAvailability(f"calendar signer {e}")
+        raise InvalidAvailability(f"calendar: {e}")
     # Same subject as the channel is not the same certificate: a superseded one keeps the name.
     if revocation.is_revoked(owner_cert, issuer):
         raise InvalidAvailability("calendar signer certificate is revoked")

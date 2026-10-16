@@ -96,6 +96,14 @@ def self_signed(cn: str, role: str):
     return key, cert.public_bytes(serialization.Encoding.PEM).decode()
 
 
+def fresh(payload: dict, ttl: int | None = None) -> dict:
+    """What every real client stamps: when it signed, a unique id, and for a one-shot request its expiry."""
+    now = int(time.time())
+    out = {**payload, "iat": now, "jti": secrets.token_hex(8)}
+    if ttl:
+        out["exp"] = now + ttl
+    return out
+
 def sign_as(key, cert_pem: str, payload: dict, typ: str) -> str:
     cert = x509.load_pem_x509_certificate(cert_pem.encode())
     x5c = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode()
@@ -105,7 +113,7 @@ def sign_as(key, cert_pem: str, payload: dict, typ: str) -> str:
 
 
 def revoke(key, cert_pem: str, serial: str, reason="keyCompromise"):
-    token = sign_as(key, cert_pem, {"serial": serial, "reason": reason},
+    token = sign_as(key, cert_pem, fresh({"serial": serial, "reason": reason}, 300),
                     "application/revocation-request+json")
     return requests.post(f"{CA}/ra/revoke", json={"request": token}, verify=CA_FILE)
 
@@ -160,9 +168,10 @@ def listed(payload: dict, serial: str) -> bool:
 def onboard(key, cert_pem: str, client) -> str:
     """Pair, bind and declare an open calendar; the appliance registers on its own poll."""
     requests.post(f"{APP}/factory-reset")
-    bundle = sign_as(key, cert_pem, {
+    bundle = sign_as(key, cert_pem, fresh({
         "vpp_mtls_url": MTLS,
-        "cert_vpp": (CERTS / "vpp.crt").read_text()}, "application/pairing+json")
+        "cert_vpp": (CERTS / "vpp.crt").read_text(),
+        "ven": requests.get(f"{APP}/ping").json()["ven"]}, 300), "application/pairing+json")
     proof = requests.post(f"{APP}/pair", json={"jws": bundle}).json()["owner_proof"]
     ven = requests.post(f"{MTLS}/appliances/owner-proof", json={"owner_proof": proof},
                         cert=client, verify=CA_FILE).json()["ven"]
@@ -254,6 +263,22 @@ def main():
         r = requests.get(f"{MTLS}/session", cert=(ucf, ukf), verify=CA_FILE)
         ok("the user is still authenticated after the refused attempts") \
             if r.status_code == 200 else die(f"user lost access: {r.status_code}")
+        # Freshness: a signed request without expiry, or one already served, is refused.
+        okey0, opem0, _, _ = ra_identity(f"op-{secrets.token_hex(3)}", role="operator")
+        _, _, _, dserial = ra_identity(f"doomed-{secrets.token_hex(3)}")
+        eternal = sign_as(okey0, opem0, {"serial": dserial, "reason": "keyCompromise", "jti": "x"},
+                          "application/revocation-request+json")
+        r = requests.post(f"{CA}/ra/revoke", json={"request": eternal}, verify=CA_FILE)
+        ok(f"a revocation request without expiry is refused ({r.status_code})") \
+            if r.status_code == 400 and "expir" in r.text else die(f"expected 400, got {r.status_code} {r.text}")
+        once = sign_as(okey0, opem0, fresh({"serial": dserial, "reason": "keyCompromise"}, 300),
+                       "application/revocation-request+json")
+        first = requests.post(f"{CA}/ra/revoke", json={"request": once}, verify=CA_FILE)
+        again = requests.post(f"{CA}/ra/revoke", json={"request": once}, verify=CA_FILE)
+        ok(f"the same request presented twice is refused as a replay ({again.status_code})") \
+            if first.status_code == 200 and again.status_code == 400 and "replay" in again.text \
+            else die(f"replay not refused: {first.status_code} then {again.status_code} {again.text}")
+        n0 = fetch_crl()[1]["crl_number"]  # the revocation above moved the list on
 
         print("G3: the operator revokes, and the list moves forward")
         okey, opem, _, _ = ra_identity(f"op-{secrets.token_hex(3)}", role="operator")
@@ -363,10 +388,10 @@ def main():
         clear_crl()
         body = requests.post(f"{APP}/poll").json()
         status = requests.get(f"{APP}/status").json()
-        fresh = datetime.datetime.fromisoformat(status["crl_next_update"])
+        next_update = datetime.datetime.fromisoformat(status["crl_next_update"])
         ok("a fresh list from the CA restores operation") \
             if (body.get("crl") or {}).get("status") in ("stored", "current") \
-            and fresh > datetime.datetime.now(datetime.timezone.utc) \
+            and next_update > datetime.datetime.now(datetime.timezone.utc) \
             else die(f"list not refreshed: {body.get('crl')}")
 
         print("G12: once the owner is revoked, the appliance refuses the owner's calendar and activations")
@@ -422,8 +447,8 @@ def main():
         aserial = format(x509.load_pem_x509_certificate(apem.encode()).serial_number, "x")
         if revoke(okey, opem, aserial, "keyCompromise").status_code != 200:
             die("could not revoke the test appliance")
-        proof = sign_as(akey, apem, {"ven": aname.rfc4514_string(), "owner": hcert.subject.rfc4514_string(),
-                                     "P": 1500, "max": 60, "rec": 30}, "application/owner-proof+json")
+        proof = sign_as(akey, apem, fresh({"ven": aname.rfc4514_string(), "owner": hcert.subject.rfc4514_string(),
+                                           "P": 1500, "max": 60, "rec": 30}, 600), "application/owner-proof+json")
         r = requests.post(f"{MTLS}/appliances/owner-proof", json={"owner_proof": proof},
                           cert=write_pair("holder", hkey, hpem), verify=CA_FILE)
         ok(f"owner proof refused ({r.status_code}: {r.json().get('error')})") \

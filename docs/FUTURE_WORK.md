@@ -89,16 +89,6 @@ re-enrolment authenticated by TLS client auth, which is what the JWS with x5c
 does by hand. CMP (RFC 4210) for the heavy version. An EST facade over
 `issue_from_csr` is thin. Medium.
 
-### Signed requests have no freshness, audience or type binding
-No `iat`, `exp`, `jti` or `aud` in any payload, and the `typ` header is set by
-every producer and checked by no verifier. Replays are harmless by idempotence
-(revoke twice is 409, the calendar has a version, evidence is unique per
-activation), not by design. The pairing bundle names no appliance and never
-expires, so it can be replayed to any factory-reset appliance while the owner
-certificate lives.
-
-Standard: RFC 8725 explicit typing, RFC 7519 claims, CMP nonces. Small.
-
 ### Renewal revokes the old certificate at once
 No overlap window, so the appliance refuses its owner until the calendar is
 signed again with the new key.
@@ -251,6 +241,13 @@ One physical appliance, with fleet behaviour exercised through a synthetic
 population of 20 users and 40 appliances.
 
 ## Resolved since the thesis
+
+- Every signed artefact declares its type and every verifier checks it (RFC
+  8725). Every token carries `iat` and `jti`; the one-shot ones, the pairing
+  bundle, the owner proof and the revocation and renewal requests, carry `exp`
+  and die within minutes, and the RA refuses a request id it has already
+  served. The bundle names the appliance it is for, so it cannot be carried to
+  another device or replayed to this one once reset.
 
 - The PKI is a hierarchy: an offline root with pathLen 1 certifies a platform
   issuing CA and a device issuing CA, both pathLen 0. Leaves carry their issuing

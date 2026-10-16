@@ -81,6 +81,6 @@ def sign(message: str) -> str:
     return sig.hex()
 
 
-def sign_jws(payload: dict, typ: str = "application/owner-proof+json") -> str:
+def sign_jws(payload: dict, typ: str = pki_jws.TYP_OWNER_PROOF, ttl_seconds: int | None = None) -> str:
     """Compact JWS signed in the HSM, the VEN certificate and its issuing CA in x5c, so a verifier holding the root can chain it."""
-    return pki_jws.sign(payload, _private_key, _chain, typ)
+    return pki_jws.sign(payload, _private_key, _chain, typ, ttl_seconds)

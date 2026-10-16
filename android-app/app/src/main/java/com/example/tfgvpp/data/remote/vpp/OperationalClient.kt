@@ -64,7 +64,7 @@ class OperationalClient(caInput: InputStream, registration: RegistrationClient.R
         val stored = myAppliances(mtlsUrl).find { it.ven == ven }?.version ?: 0L
         val version = maxOf(stored + 1, System.currentTimeMillis())
         val jws = RegistrationClient.signedJws(credential,
-            mapOf("slots" to slots, "version" to version))
+            mapOf("slots" to slots, "version" to version), RegistrationClient.TYP_AVAILABILITY)
         val vpp = postJson(mtls, "$mtlsUrl/availability",
             mapOf("ven" to ven, "jws" to jws))
         return DeclareResult(

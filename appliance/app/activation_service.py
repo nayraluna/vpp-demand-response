@@ -85,7 +85,7 @@ def _adopt_calendar(jws_token: str, cfg: dict) -> dict:
     try:
         certs = pki_chain.x5c_chain(jwt.get_unverified_header(jws_token))
         owner = certs[0]
-        payload = pki_jws.decode_with(jws_token, owner)
+        payload = pki_jws.decode_with(jws_token, owner, typ=pki_jws.TYP_AVAILABILITY)
     except Exception as e:
         return {"status": "refused",
                 "reason": f"unsigned or malformed calendar: {e}"}
@@ -338,7 +338,7 @@ def _submit_evidence() -> dict:
             "time": executed.strftime("%H:%M"),
             "executed_at": record["executed_at"],
             "reduction_pct": record["reduction_pct"],
-        }, typ="application/dr-evidence+json")
+        }, typ=pki_jws.TYP_EVIDENCE)
 
         result = vtn_client.submit_evidence(
             cfg["vpp_mtls_url"], str(hsm.CA_FILE), *_ven_identity(), proof)

@@ -56,8 +56,9 @@ app = FastAPI(title="Appliance (VEN) pairing", version="0.2.0", lifespan=lifespa
 
 @app.get("/ping")
 def ping() -> dict:
+    # The subject lets the application address its bundle to this appliance and no other.
     return {"status": "ok", "service": "appliance",
-            "state": pairing_service.config()["state"]}
+            "state": pairing_service.config()["state"], "ven": hsm.subject()}
 
 
 PAIRING_PORT = 8082  # must match the port this service is started on

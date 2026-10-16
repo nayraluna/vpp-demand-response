@@ -198,17 +198,28 @@ class RegistrationClient(caInput: InputStream) {
         fun softwareKeyPair(): KeyPair =
             KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
 
-        /** Compact JWS with the certificate in x5c; ES256 for EC keys, RS256 for RSA, the platform accepts both. */
-        fun signedJws(credential: UserCredential, claims: Map<String, Any>): String {
+        const val TYP_PAIRING = "application/pairing+json"
+        const val TYP_AVAILABILITY = "application/availability+json"
+
+        /** Compact JWS with the certificate in x5c and an explicit type; ES256 for EC keys, RS256 for
+         *  RSA, the platform accepts both. Every token is stamped with when it was signed and a unique
+         *  id, and a one-shot request (`ttlSeconds`) with when it dies, so a captured one is worthless. */
+        fun signedJws(
+            credential: UserCredential, claims: Map<String, Any>, typ: String, ttlSeconds: Long? = null,
+        ): String {
             val isEc = credential.privateKey.algorithm == "EC"
             val algorithm = if (isEc) JWSAlgorithm.ES256 else JWSAlgorithm.RS256
             val signer = if (isEc) ECDSASigner(credential.privateKey, Curve.P_256)
             else RSASSASigner(credential.privateKey)
+            val now = System.currentTimeMillis() / 1000
+            val stamped = claims + mapOf("iat" to now, "jti" to java.util.UUID.randomUUID().toString()) +
+                    (ttlSeconds?.let { mapOf("exp" to now + it) } ?: emptyMap())
             return JWSObject(
                 JWSHeader.Builder(algorithm)
+                    .type(com.nimbusds.jose.JOSEObjectType(typ))
                     .x509CertChain(listOf(Base64.encode(credential.certificate.encoded)))
                     .build(),
-                Payload(claims),
+                Payload(stamped),
             ).apply { sign(signer) }.serialize()
         }
     }

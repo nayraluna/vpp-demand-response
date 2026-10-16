@@ -12,9 +12,9 @@ class DuplicateEvidence(Exception):
 def verify(jws_token: str, submitter_subject: str) -> dict:
     """Verify the evidence and return its fields; `submitter_subject` is the mTLS identity."""
     try:
-        ven_cert, issuer, payload = crypto_service.verify_signer(jws_token)
+        ven_cert, issuer, payload = crypto_service.verify_signer(jws_token, crypto_service.pki_jws.TYP_EVIDENCE)
     except ValueError as e:
-        raise InvalidEvidence(f"appliance certificate {e}")
+        raise InvalidEvidence(f"evidence: {e}")
     # Same subject as the channel is not the same certificate: a superseded one keeps the name.
     if revocation.is_revoked(ven_cert, issuer):
         raise InvalidEvidence("appliance certificate is revoked")

@@ -60,12 +60,22 @@ class PairingClient(caInput: InputStream, private val registration: Registration
         applianceUrl: String,
         vppMtlsUrlForAppliance: String,
     ): PairResult {
+        // The bundle is addressed to this appliance by name and lives five minutes, so it cannot be
+        // carried to another device or replayed to this one once reset.
+        val ping = local.newCall(Request.Builder().url("$applianceUrl/ping").build()).execute().use { r ->
+            val text = r.body!!.string()
+            check(r.isSuccessful) { "HTTP ${r.code} $applianceUrl/ping -> ${text.take(200)}" }
+            JSONObjectUtils.parse(text)
+        }
         // Signing the bundle is what tells the appliance, authenticated, who is enrolling it.
         val payload = mapOf(
             "vpp_mtls_url" to vppMtlsUrlForAppliance,
             "cert_vpp" to registration.vppCertificatePem,
+            "ven" to (ping["ven"] as String),
         )
-        val bundle = RegistrationClient.signedJws(registration.credential, payload)
+        val bundle = RegistrationClient.signedJws(
+            registration.credential, payload, RegistrationClient.TYP_PAIRING, ttlSeconds = 300,
+        )
 
         val body = JSONObjectUtils.toJSONString(mapOf("jws" to bundle))
             .toRequestBody(jsonType)

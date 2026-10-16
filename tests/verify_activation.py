@@ -76,6 +76,14 @@ def ra_identity(name: str, org_unit: str | None = None):
     return key, cert_pem, (str(cf), str(kf))
 
 
+def fresh(payload: dict, ttl: int | None = None) -> dict:
+    """What every real client stamps: when it signed, a unique id, and for a one-shot request its expiry."""
+    now = int(time.time())
+    out = {**payload, "iat": now, "jti": secrets.token_hex(8)}
+    if ttl:
+        out["exp"] = now + ttl
+    return out
+
 def sign_as(key, cert_pem: str, payload: dict, typ: str) -> str:
     cert = x509.load_pem_x509_certificate(cert_pem.encode())
     x5c = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode()
@@ -89,9 +97,10 @@ def sign_as(key, cert_pem: str, payload: dict, typ: str) -> str:
 def onboard(key, cert_pem, client, calendar) -> str:
     """Pair, bind and declare; the appliance registers and fetches the calendar on its own poll."""
     requests.post(f"{APP}/factory-reset")
-    bundle = sign_as(key, cert_pem, {
+    bundle = sign_as(key, cert_pem, fresh({
         "vpp_mtls_url": MTLS,
-        "cert_vpp": (CERTS / "vpp.crt").read_text()}, "application/pairing+json")
+        "cert_vpp": (CERTS / "vpp.crt").read_text(),
+        "ven": requests.get(f"{APP}/ping").json()["ven"]}, 300), "application/pairing+json")
     proof = requests.post(f"{APP}/pair", json={"jws": bundle}).json()["owner_proof"]
     ven = requests.post(f"{MTLS}/appliances/owner-proof", json={"owner_proof": proof},
                         cert=client, verify=CA_FILE).json()["ven"]

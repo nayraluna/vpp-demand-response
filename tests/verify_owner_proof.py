@@ -3,6 +3,7 @@ import secrets
 import shutil
 import sqlite3
 import sys
+import time
 import tempfile
 from pathlib import Path
 
@@ -57,6 +58,14 @@ def enrolled_user(name: str):
     return key, cert_pem, (str(cf), str(kf))
 
 
+def fresh(payload: dict, ttl: int | None = None) -> dict:
+    """What every real client stamps: when it signed, a unique id, and for a one-shot request its expiry."""
+    now = int(time.time())
+    out = {**payload, "iat": now, "jti": secrets.token_hex(8)}
+    if ttl:
+        out["exp"] = now + ttl
+    return out
+
 def pair_appliance(key, cert_pem: str) -> dict:
     requests.post(f"{APP}/factory-reset")
     cert = x509.load_pem_x509_certificate(cert_pem.encode())
@@ -64,10 +73,11 @@ def pair_appliance(key, cert_pem: str) -> dict:
     key_pem = key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption())
-    token = jwt.encode({
+    token = jwt.encode(fresh({
         "vpp_mtls_url": MTLS,
         "cert_vpp": (CERTS / "vpp.crt").read_text(),
-    }, key_pem, algorithm="ES256",
+        "ven": requests.get(f"{APP}/ping").json()["ven"],
+    }, 300), key_pem, algorithm="ES256",
         headers={"x5c": [x5c], "typ": "application/pairing+json"})
     r = requests.post(f"{APP}/pair", json={"jws": token})
     if not r.ok:
@@ -84,10 +94,10 @@ def forged_proof(owner_subject: str, power: int) -> str:
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption())
     alg = "ES256" if isinstance(key, ec.EllipticCurvePrivateKey) else "RS256"
-    return jwt.encode({
+    return jwt.encode(fresh({
         "ven": cert.subject.rfc4514_string(), "owner": owner_subject,
         "P": power, "max": 120, "rec": 30,
-    }, key_pem, algorithm=alg,
+    }, 600), key_pem, algorithm=alg,
         headers={"x5c": [x5c], "typ": "application/owner-proof+json"})
 
 

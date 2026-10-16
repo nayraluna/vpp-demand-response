@@ -27,9 +27,10 @@ def certified_nominal_power(certificate: x509.Certificate) -> int:
 def verify(jws_token: str, authenticated_user: str) -> dict:
     """Verify the proof and return the binding; `authenticated_user` is the mTLS identity."""
     try:
-        ven_cert, issuer, payload = crypto_service.verify_signer(jws_token)
+        ven_cert, issuer, payload = crypto_service.verify_signer(
+            jws_token, crypto_service.pki_jws.TYP_OWNER_PROOF, require_exp=True)
     except ValueError as e:
-        raise InvalidOwnerProof(f"appliance certificate {e}")
+        raise InvalidOwnerProof(f"owner proof: {e}")
     # The user forwards this proof, so the appliance's certificate never crossed the mTLS door.
     if revocation.is_revoked(ven_cert, issuer):
         raise InvalidOwnerProof("appliance certificate is revoked")

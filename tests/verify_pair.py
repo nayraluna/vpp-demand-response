@@ -2,6 +2,7 @@ import base64
 import datetime
 import secrets
 import sys
+import time
 from pathlib import Path
 
 import jwt
@@ -55,14 +56,23 @@ def self_signed(cn: str):
     return key, cert.public_bytes(serialization.Encoding.PEM).decode()
 
 
-def make_jws(key, cert_pem: str, payload: dict) -> str:
+def fresh(payload: dict, ttl: int | None = None) -> dict:
+    """What every real client stamps: when it signed, a unique id, and for a one-shot request its expiry."""
+    now = int(time.time())
+    out = {**payload, "iat": now, "jti": secrets.token_hex(8)}
+    if ttl:
+        out["exp"] = now + ttl
+    return out
+
+
+def make_jws(key, cert_pem: str, payload: dict, typ: str = "application/pairing+json") -> str:
     cert = x509.load_pem_x509_certificate(cert_pem.encode())
     x5c = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode()
     key_pem = key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption())
     return jwt.encode(payload, key_pem, algorithm="ES256",
-                      headers={"x5c": [x5c], "typ": "application/pairing+json"})
+                      headers={"x5c": [x5c], "typ": typ})
 
 
 def fake_platform():
@@ -112,12 +122,13 @@ def expired_from_ca(cn: str):
     return key, pem(cert) + pem(ca)
 
 
-def bundle() -> dict:
-    """How to reach the VPP; the appliance reports its own parameters."""
-    return {
+def bundle(ttl: int | None = 300, ven: str | None = None) -> dict:
+    """How to reach the VPP, addressed to this appliance and short-lived; the appliance reports its own parameters."""
+    return fresh({
         "vpp_mtls_url": "https://127.0.0.1:8443",
         "cert_vpp": (CERTS / "vpp.crt").read_text(),
-    }
+        "ven": ven or requests.get(f"{APP}/ping").json()["ven"],
+    }, ttl)
 
 
 def main():
@@ -157,6 +168,24 @@ def main():
     ok(f"expired owner certificate rejected (400): {r.json().get('detail', '')}") \
         if r.status_code == 400 and "expired" in r.text \
         else die(f"expected 400 expired, got {r.status_code} {r.text}")
+
+    # Freshness: a bundle is one shot, addressed, and dies in minutes, so a captured one is worthless.
+    r = requests.post(f"{APP}/pair", json={"jws": make_jws(okey, ocert, bundle(ven="CN=some-other-appliance"))})
+    ok(f"a bundle addressed to another appliance is refused (400): {r.json().get('detail', '')}") \
+        if r.status_code == 400 and "addressed" in r.text \
+        else die(f"expected 400 on a misaddressed bundle, got {r.status_code} {r.text}")
+    stale = bundle(ttl=None)
+    stale["exp"] = int(time.time()) - 600
+    r = requests.post(f"{APP}/pair", json={"jws": make_jws(okey, ocert, stale)})
+    ok("an expired bundle is refused (400)") if r.status_code == 400 and "expired" in r.text \
+        else die(f"expected 400 on an expired bundle, got {r.status_code} {r.text}")
+    r = requests.post(f"{APP}/pair", json={"jws": make_jws(okey, ocert, bundle(ttl=None))})
+    ok("a bundle without expiry is refused (400)") if r.status_code == 400 \
+        else die(f"expected 400 on a bundle without exp, got {r.status_code} {r.text}")
+    r = requests.post(f"{APP}/pair", json={"jws": make_jws(okey, ocert, bundle(), typ="application/availability+json")})
+    ok(f"a token of another type is refused (400): {r.json().get('detail', '')}") \
+        if r.status_code == 400 and "not application/pairing" in r.text \
+        else die(f"expected 400 on a wrong typ, got {r.status_code} {r.text}")
 
     print("G2: a correct bundle pairs the appliance")
     r = requests.post(f"{APP}/pair", json={"jws": token})

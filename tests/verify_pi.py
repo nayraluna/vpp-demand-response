@@ -78,13 +78,24 @@ def ra_identity(name: str):
     return key, cert_pem, (str(cf), str(kf))
 
 
-def user_jws(key, cert_pem: str, payload: dict) -> str:
+def fresh(payload: dict, ttl: int | None = None) -> dict:
+    """What every real client stamps: when it signed, a unique id, and for a one-shot request its expiry."""
+    now = int(time.time())
+    out = {**payload, "iat": now, "jti": secrets.token_hex(8)}
+    if ttl:
+        out["exp"] = now + ttl
+    return out
+
+
+def user_jws(key, cert_pem: str, payload: dict, typ: str = "application/pairing+json",
+             ttl: int | None = 300) -> str:
     cert = x509.load_pem_x509_certificate(cert_pem.encode())
     x5c = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode()
     key_pem = key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption())
-    return jwt.encode(payload, key_pem, algorithm="ES256", headers={"x5c": [x5c]})
+    return jwt.encode(fresh(payload, ttl), key_pem, algorithm="ES256",
+                      headers={"x5c": [x5c], "typ": typ})
 
 
 def reset_operational_state():
@@ -135,6 +146,7 @@ def main():
     bundle = user_jws(ukey, ucert, {
         "vpp_mtls_url": MTLS_FOR_PI,
         "cert_vpp": (CERTS / "vpp.crt").read_text(),
+        "ven": requests.get(f"{PI}/ping", timeout=10).json()["ven"],
     })
     r = requests.post(f"{PI}/pair", json={"jws": bundle}, timeout=15)
     if not r.ok:
@@ -161,8 +173,8 @@ def main():
     cal_version = int(time.time() * 1000)
     r = requests.post(f"{MTLS}/availability",
                       json={"ven": ven,
-                            "jws": user_jws(ukey, ucert,
-                                            {"slots": week, "version": cal_version})},
+                            "jws": user_jws(ukey, ucert, {"slots": week, "version": cal_version},
+                                            typ="application/availability+json", ttl=None)},
                       cert=uclient, verify=CA_FILE)
     ok(f"VPP: {r.json()['status']} ({r.json()['declared_slots']} slots, "
        f"version {r.json()['version']})") \

@@ -69,8 +69,9 @@ def bind_appliance(key, cert_pem: str, client) -> str:
     key_pem = key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption())
-    token = jwt.encode({"vpp_mtls_url": MTLS,
-                        "cert_vpp": (CERTS / "vpp.crt").read_text()},
+    token = jwt.encode(fresh({"vpp_mtls_url": MTLS,
+                              "cert_vpp": (CERTS / "vpp.crt").read_text(),
+                              "ven": requests.get(f"{APP}/ping").json()["ven"]}, 300),
                        key_pem, algorithm="ES256",
                        headers={"x5c": [x5c], "typ": "application/pairing+json"})
     proof = requests.post(f"{APP}/pair", json={"jws": token}).json()["owner_proof"]
@@ -91,6 +92,14 @@ def weekday_calendar() -> dict:
         week[day] = "".join(bitmap)
     return week
 
+
+def fresh(payload: dict, ttl: int | None = None) -> dict:
+    """What every real client stamps: when it signed, a unique id, and for a one-shot request its expiry."""
+    now = int(time.time())
+    out = {**payload, "iat": now, "jti": secrets.token_hex(8)}
+    if ttl:
+        out["exp"] = now + ttl
+    return out
 
 def sign_calendar(key, cert_pem: str, slots: dict, version: int) -> str:
     cert = x509.load_pem_x509_certificate(cert_pem.encode())

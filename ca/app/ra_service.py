@@ -7,6 +7,7 @@ are public, and reads the CRLs like any other relying party.
 """
 import datetime
 import sys
+import threading
 from pathlib import Path
 
 import jwt
@@ -36,6 +37,12 @@ class NotOperator(Exception):
 
 _root = None
 _issuing: list[x509.Certificate] = []
+# Ids of the signed requests already served, kept until they expire: a captured request
+# cannot be replayed inside its short life either. The life is bounded by the RA, not by
+# the signer, so the memory cannot be grown by requests that claim to live for years.
+_seen: dict[str, int] = {}
+_seen_lock = threading.Lock()
+MAX_REQUEST_LIFE = 600 + pki_jws.LEEWAY_SECONDS
 
 
 def initialize() -> None:
@@ -94,8 +101,9 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
     return ca_client.sign(csr_pem, profile, san, days, supersedes)
 
 
-def _verify_signed_request(token: str) -> tuple[x509.Certificate, dict]:
-    """Verify a JWS against the certificate in its x5c: chains to the root, within validity, not revoked."""
+def _verify_signed_request(token: str, typ: str) -> tuple[x509.Certificate, dict]:
+    """Verify a JWS against the certificate in its x5c: chains to the root, within validity, not revoked,
+    of the expected type, short-lived, and not seen before."""
     try:
         header = jwt.get_unverified_header(token)
         certs = pki_chain.x5c_chain(header)
@@ -111,15 +119,29 @@ def _verify_signed_request(token: str) -> tuple[x509.Certificate, dict]:
     if ca_client.is_revoked(signer, issuer):
         raise InvalidRequest("signer certificate is revoked")
     try:
-        payload = pki_jws.decode_with(token, signer)
+        payload = pki_jws.decode_with(token, signer, typ=typ, require_exp=True)
+    except pki_jws.WrongType as e:
+        raise InvalidRequest(str(e))
     except Exception as e:
-        raise InvalidRequest(f"request signature invalid: {e}")
+        raise InvalidRequest(f"request signature invalid, expired, or without expiry: {e}")
+    jti = payload.get("jti")
+    if not isinstance(jti, str) or not jti:
+        raise InvalidRequest("request carries no identifier (jti)")
+    now_ts = int(now.timestamp())
+    if int(payload["exp"]) > now_ts + MAX_REQUEST_LIFE:
+        raise InvalidRequest(f"request claims a life beyond {MAX_REQUEST_LIFE} s")
+    with _seen_lock:
+        for seen_id in [k for k, until in _seen.items() if until < now_ts]:
+            del _seen[seen_id]
+        if jti in _seen:
+            raise InvalidRequest("request already served (replay)")
+        _seen[jti] = int(payload["exp"]) + pki_jws.LEEWAY_SECONDS
     return signer, payload
 
 
 def verify_revocation_request(token: str) -> dict:
     """Only an operator may revoke. Returns the order to execute."""
-    signer, payload = _verify_signed_request(token)
+    signer, payload = _verify_signed_request(token, pki_jws.TYP_REVOCATION)
     roles = [a.value for a in signer.subject.get_attributes_for_oid(NameOID.ORGANIZATIONAL_UNIT_NAME)]
     if "role=operator" not in roles:
         raise NotOperator("signer does not carry the operator role")
@@ -138,7 +160,7 @@ def verify_revocation_request(token: str) -> dict:
 
 def renew_from_request(token: str) -> dict:
     """Re-key: a valid holder signs a CSR for a new key, same subject; the old serial is superseded."""
-    signer, payload = _verify_signed_request(token)
+    signer, payload = _verify_signed_request(token, pki_jws.TYP_RENEWAL)
     csr_pem = payload.get("csr")
     if not isinstance(csr_pem, str):
         raise InvalidRequest("request must carry the CSR for the new key")

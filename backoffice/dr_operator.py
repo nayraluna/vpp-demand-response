@@ -36,7 +36,7 @@ def renew() -> tuple[str, str]:
     key = ec.generate_private_key(ec.SECP256R1())
     csr = x509.CertificateSigningRequestBuilder().subject_name(subject).sign(key, hashes.SHA256())
     token = _sign_as_operator({"csr": csr.public_bytes(serialization.Encoding.PEM).decode()},
-                              "application/renewal-request+json")
+                              pki_jws.TYP_RENEWAL)
     r = requests.post(f"{CA}/ra/renew", json={"request": token}, verify=CA_FILE)
     if r.status_code != 200:
         raise SystemExit(f"operator renewal refused: HTTP {r.status_code} "
@@ -60,12 +60,13 @@ def _sign_as_operator(payload: dict, typ: str) -> str:
     crt, key = credential()
     chain = pki_chain.load_pem_chain(Path(crt).read_bytes())
     private = serialization.load_pem_private_key(Path(key).read_bytes(), password=None)
-    return pki_jws.sign(payload, private, chain, typ)
+    # Five minutes: long enough for the round trip, short enough that a captured request is worthless.
+    return pki_jws.sign(payload, private, chain, typ, ttl_seconds=300)
 
 
 def revoke(serial: str, reason: str) -> None:
     token = _sign_as_operator({"serial": serial, "reason": reason},
-                              "application/revocation-request+json")
+                              pki_jws.TYP_REVOCATION)
     r = requests.post(f"{CA}/ra/revoke", json={"request": token}, verify=CA_FILE)
     body = r.json()
     if r.status_code != 200:
