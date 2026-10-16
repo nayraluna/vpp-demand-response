@@ -183,7 +183,7 @@ def main():
         if reg and reg.get("registration_id") else die(f"no self-registration: {reg}")
 
     print("G6: the operator activates; the Pi pulls, executes and testifies")
-    crt, key = dr_operator.init_credential()
+    crt, key = dr_operator.credential()
     r = requests.post(f"{MTLS}/dr/activate",
                       json={"power_w": 1000, **current_window(),
                             "action": "reduce"},

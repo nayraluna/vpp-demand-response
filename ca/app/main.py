@@ -69,6 +69,7 @@ class CsrRequest(BaseModel):
 @app.post("/ra/issue")
 def ra_issue(req: CsrRequest) -> dict:
     try:
+        ra_service.refuse_requested_role(req.csr)
         return ra_service.issue_from_csr(req.csr)
     except ra_service.InvalidCSR as e:
         raise HTTPException(status_code=400, detail=str(e))

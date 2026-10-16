@@ -14,10 +14,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.bouncycastle.asn1.x500.X500NameBuilder
-import org.bouncycastle.asn1.x500.style.BCStyle
-import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
-import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequestBuilder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -26,13 +22,14 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.net.Socket
-import java.security.KeyPairGenerator
-import java.security.spec.ECGenParameterSpec
+import java.security.KeyFactory
+import java.security.spec.PKCS8EncodedKeySpec
 import java.security.SecureRandom
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
+import java.util.Base64
 
 class RegistrationFlowTest {
 
@@ -54,6 +51,7 @@ class RegistrationFlowTest {
     fun requireLiveServices() {
         assumeTrue("CA.crt not found at $caFile", caFile.isFile)
         assumeTrue("venv python not found at $python", python.isFile)
+        assumeTrue("operator credential not provisioned", File(repoDir, "backoffice/operator.crt").isFile)
         for (port in intArrayOf(8080, 8081, 8082, 8443)) {
             assumeTrue("service on :$port is not running",
                 runCatching { Socket("127.0.0.1", port).close() }.isSuccess)
@@ -161,7 +159,7 @@ class RegistrationFlowTest {
         val slotStart = minOf(nowUtc.hour * 2 + nowUtc.minute / 30, 44)
         val slotEnd = slotStart + 4
 
-        val operator = operatorCredential(ca)
+        val operator = operatorCredential()
         val opMtls = RegistrationClient.buildMutualTlsClient(operator, ca)
         val activate = postJson(opMtls, "$mtlsUrl/dr/activate", mapOf(
             "power_w" to 1000, "day" to day,
@@ -270,25 +268,16 @@ class RegistrationFlowTest {
 
     private fun slotLabel(slot: Int) = "%02d:%02d".format(slot / 2, (slot % 2) * 30)
 
-    /** RA-issued OU=role=operator credential; fresh name because the CA issues one live certificate per subject. */
-    private fun operatorCredential(ca: X509Certificate): RegistrationClient.UserCredential {
-        val keyPair = KeyPairGenerator.getInstance("EC")
-            .apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
-        val tag = ByteArray(3).let { SecureRandom().nextBytes(it); it.joinToString("") { b -> "%02x".format(b) } }
-        val subject = X500NameBuilder(BCStyle.INSTANCE)
-            .addRDN(BCStyle.CN, "test-operator-$tag")
-            .addRDN(BCStyle.OU, "role=operator")
-            .build()
-        val csr = JcaPKCS10CertificationRequestBuilder(subject, keyPair.public)
-            .build(JcaContentSignerBuilder("SHA256withECDSA").build(keyPair.private))
-        val issued = postJson(
-            RegistrationClient.buildServerAuthClient(ca), "$raUrl/ra/issue",
-            mapOf("csr" to RegistrationClient.toPem("CERTIFICATE REQUEST", csr.encoded)),
-        )
-        val certPem = issued["certificate"] as String
+    /** The operator credential provisioned at setup: the CA grants the role there and refuses it online. */
+    private fun operatorCredential(): RegistrationClient.UserCredential {
+        val dir = File(repoDir, "backoffice")
+        val certPem = File(dir, "operator.crt").readText()
         val cert = CertificateFactory.getInstance("X.509")
             .generateCertificate(certPem.byteInputStream()) as X509Certificate
-        return RegistrationClient.UserCredential(keyPair.private, cert, certPem)
+        val der = Base64.getMimeDecoder().decode(
+            File(dir, "operator.key").readText().replace(Regex("-----[A-Z ]+-----"), ""))
+        val key = KeyFactory.getInstance("EC").generatePrivate(PKCS8EncodedKeySpec(der))
+        return RegistrationClient.UserCredential(key, cert, certPem)
     }
 
     private fun postJson(client: OkHttpClient, url: String, body: Map<String, Any>): Map<String, Any> {

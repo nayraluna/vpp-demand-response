@@ -21,8 +21,8 @@ RA host must not allow minting certificates. Large.
 `/ra/issue` accepts any well formed CSR whose self signature verifies, whose
 public key has not been seen before and whose subject holds no live
 certificate. Anyone who reaches port 8081 obtains a certificate with the
-subject they choose, including `OU=P=<watts>` for an appliance or
-`OU=role=operator` for the backoffice.
+subject they choose, including `OU=P=<watts>` for an appliance. A role is the
+one attribute it refuses, see below.
 
 Production: the RA checks that the requester is entitled to the requested
 subject. Appliances are provisioned at the factory over an internal channel,
@@ -44,18 +44,6 @@ to platform pseudonym in its own database and can enforce one credential per
 person. The DNIe certificate never enters the platform certificate, so the
 pseudonym would be bound to a verified person. This mirrors how EST or CMP enrol
 with an existing credential. Medium.
-
-### The operator role is self declared
-`backoffice/dr_operator.py init` builds a CSR with `OU=role=operator` and the
-CA signs it with no check. The VPP then authorises `/dr/select` and
-`/dr/activate` purely on that OU (`_is_operator`). The operator credential is
-the most privileged one in the platform and today anyone who can reach port
-8081 can obtain it.
-
-Fix: the RA must never take a role from the CSR. Operator issuance goes through
-an authenticated onboarding, and the RA sets the role itself from that
-decision. In production the operator credential would also be short lived and
-stored in an HSM or smart card. Medium.
 
 ### The pseudonym is the app's, and the key is not attested
 The certificate CN is `android-<48 random bits>`, picked by the app, and the
@@ -261,6 +249,11 @@ One physical appliance, with fleet behaviour exercised through a synthetic
 population of 20 users and 40 appliances.
 
 ## Resolved since the thesis
+
+- The operator credential is provisioned at setup like the VPP and the
+  appliance: `backoffice/provision.py` generates the key, the CA host signs the
+  CSR, and `/ra/issue` refuses any CSR that asks for a role, so the most
+  privileged credential can no longer be obtained by whoever reaches port 8081.
 
 - The VPP records an activation as ending when its window does, so its recovery
   clock and the appliance's start at the same moment.

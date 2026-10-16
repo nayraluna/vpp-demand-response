@@ -184,6 +184,17 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
     }
 
 
+def refuse_requested_role(csr_pem: str) -> None:
+    """The online endpoint issues plain identities. A role is granted on the CA host, at setup."""
+    try:
+        csr = x509.load_pem_x509_csr(csr_pem.encode())
+    except Exception:
+        return  # issue_from_csr reports the parse error
+    for attr in csr.subject.get_attributes_for_oid(NameOID.ORGANIZATIONAL_UNIT_NAME):
+        if attr.value.strip().lower().startswith("role="):
+            raise InvalidCSR("a role is granted on the CA host, it cannot be requested online")
+
+
 def _issued_here(cert: x509.Certificate) -> bool:
     """Signed by this CA, the root still valid, the leaf an end entity that may sign."""
     try:

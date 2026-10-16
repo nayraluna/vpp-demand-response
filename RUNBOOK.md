@@ -110,8 +110,6 @@ Otherwise it rejects with `activation is for X, today is Y` or
 `activation window has not started yet / has already elapsed`. The block below computes both from the clock, so do not type them by hand.
 
 ```powershell
-python backoffice/dr_operator.py init   # first time only, creates the operator credential
-
 $utc  = [DateTime]::UtcNow
 $day  = $utc.DayOfWeek.ToString().Substring(0, 3).ToLower()
 $from = $utc.Hour
@@ -293,19 +291,19 @@ signed on the device, and 2.0 kWh to 0.30 EUR.
 ## Appendix: regenerating the CA
 
 Only if unavoidable. `CA.crt` is copied into places that do not update
-themselves: the APK, the Pi, the operator credential and the VPP database.
+themselves: the APK, the Pi and the VPP database.
 Regenerating it invalidates every existing certificate. Full order:
 
 1. Stop the local services and close the app.
 2. `python provision_all.py`. The CA creates a new root and wipes its register,
-   then the VPP and the appliance each generate a new key and obtain a
-   certificate from their CSR.
+   then the VPP, the appliance and the DR operator each generate a new key and
+   obtain a certificate from their CSR.
 3. Clear the old state: delete `vpp-server/vpp.db`, and reset the PC appliance
    by deleting `appliance/config.json` and
    `appliance/trust_vpp.pem`.
 4. App: copy `certs/CA.crt` over `android-app/app/src/main/res/raw/ca.crt`,
    rebuild, reinstall the APK, log out in the app and register again.
-5. Operator: `python backoffice/dr_operator.py init --force`.
+5. Operator: nothing to do, step 2 already reissued its credential.
 6. Pi: the device keeps its own key and its own identity, so nothing private
    is copied. On the Pi, `python appliance/provision.py request --ven ven-0002`
    writes `~/certs/VEN.key` and `~/certs/VEN.csr`. Copy only the CSR to the PC

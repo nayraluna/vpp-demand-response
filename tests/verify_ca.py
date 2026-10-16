@@ -113,6 +113,18 @@ def main():
     ok(f"a second live certificate for the same subject refused (409): {r.json().get('detail', '')[:60]}") \
         if r.status_code == 409 and "subject" in r.text \
         else die(f"expected 409 on subject collision, got {r.status_code} {r.text}")
+    # A role is granted on the CA host at setup. Online, anyone could ask for it.
+    role_csr = (x509.CertificateSigningRequestBuilder()
+                .subject_name(x509.Name([
+                    x509.NameAttribute(NameOID.COMMON_NAME, f"{cn}-op"),
+                    x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "role=operator")]))
+                .sign(ec.generate_private_key(ec.SECP256R1()), hashes.SHA256()))
+    r = requests.post(f"{CA}/ra/issue",
+                      json={"csr": role_csr.public_bytes(serialization.Encoding.PEM).decode()},
+                      verify=CA_FILE)
+    ok("a CSR asking for the operator role is refused online (400)") \
+        if r.status_code == 400 and "role" in r.text \
+        else die(f"expected 400 on a requested role, got {r.status_code} {r.text}")
 
     print(f"\nCERTIFICATE ISSUANCE COMPLETE: {passed} checks passed.")
 

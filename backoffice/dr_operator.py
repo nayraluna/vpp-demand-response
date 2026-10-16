@@ -1,6 +1,5 @@
 import argparse
 import base64
-import datetime
 import json
 import os
 import sys
@@ -23,29 +22,23 @@ KEY_FILE = Path(__file__).resolve().parent / "operator.key"
 CRT_FILE = Path(__file__).resolve().parent / "operator.crt"
 
 
-def init_credential(force: bool = False) -> tuple[str, str]:
-    """Issue or reuse the operator credential; `force` renews it, or replaces it if its root is gone."""
-    have = KEY_FILE.exists() and CRT_FILE.exists()
-    if have and not force:
-        return str(CRT_FILE), str(KEY_FILE)
-    renew = have and _chains_to_current_root(
-        x509.load_pem_x509_certificate(CRT_FILE.read_bytes()))
+def credential() -> tuple[str, str]:
+    """The credential provisioned at setup (backoffice/provision.py), as a mutual-TLS client pair."""
+    if not (KEY_FILE.exists() and CRT_FILE.exists()):
+        raise SystemExit("no operator credential: run provision_all.py")
+    return str(CRT_FILE), str(KEY_FILE)
 
+
+def renew() -> tuple[str, str]:
+    """Re-key online. The request is signed with the current credential, so the role it holds is kept."""
+    subject = x509.load_pem_x509_certificate(Path(credential()[0]).read_bytes()).subject
     key = ec.generate_private_key(ec.SECP256R1())
-    csr = (x509.CertificateSigningRequestBuilder()
-           .subject_name(x509.Name([
-               x509.NameAttribute(NameOID.COMMON_NAME, "dr-operator"),
-               x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "role=operator"),
-           ]))
-           .sign(key, hashes.SHA256()))
-    csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode()
-    if renew:
-        token = _sign_as_operator({"csr": csr_pem}, "application/renewal-request+json")
-        r = requests.post(f"{CA}/ra/renew", json={"request": token}, verify=CA_FILE)
-    else:
-        r = requests.post(f"{CA}/ra/issue", json={"csr": csr_pem}, verify=CA_FILE)
+    csr = x509.CertificateSigningRequestBuilder().subject_name(subject).sign(key, hashes.SHA256())
+    token = _sign_as_operator({"csr": csr.public_bytes(serialization.Encoding.PEM).decode()},
+                              "application/renewal-request+json")
+    r = requests.post(f"{CA}/ra/renew", json={"request": token}, verify=CA_FILE)
     if r.status_code != 200:
-        raise SystemExit(f"operator credential refused: HTTP {r.status_code} "
+        raise SystemExit(f"operator renewal refused: HTTP {r.status_code} "
                          f"{r.json().get('detail', r.text)}")
     CRT_FILE.write_text(r.json()["certificate"])
     pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
@@ -61,26 +54,9 @@ def _hour_to_slot(text: str) -> int:
     return av.slot_index(int(hour), int(minute or 0))
 
 
-def _chains_to_current_root(cert: x509.Certificate) -> bool:
-    root = x509.load_pem_x509_certificate(Path(CA_FILE).read_bytes())
-    try:
-        cert.verify_directly_issued_by(root)
-        now = datetime.datetime.now(datetime.timezone.utc)
-        if not (root.not_valid_before_utc <= now <= root.not_valid_after_utc):
-            return False
-        if not root.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
-            return False
-        # The leaf must be an end entity allowed to sign, not a CA certificate used as one.
-        if cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
-            return False
-        return cert.extensions.get_extension_for_class(x509.KeyUsage).value.digital_signature
-    except Exception:
-        return False
-
-
 def _sign_as_operator(payload: dict, typ: str) -> str:
     """A JWS carrying the operator certificate in x5c, so the CA, which has no client certificates, knows who asks."""
-    crt, key = init_credential()
+    crt, key = credential()
     cert = x509.load_pem_x509_certificate(Path(crt).read_bytes())
     x5c = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode()
     private = serialization.load_pem_private_key(Path(key).read_bytes(), password=None)
@@ -121,7 +97,7 @@ def show_crl() -> None:
 
 
 def _request(path: str, body: dict) -> dict:
-    client = init_credential()
+    client = credential()
     r = requests.post(f"{MTLS}{path}", json=body, cert=client, verify=CA_FILE)
     payload = r.json()
     if r.status_code not in (200, 409):  # 409 = infeasible activation, reported
@@ -149,9 +125,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Backoffice - DR operator trigger.")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    i = sub.add_parser("init", help="obtain the operator credential from the RA")
-    i.add_argument("--force", action="store_true",
-                   help="reissue even if a credential already exists")
+    sub.add_parser("renew", help="re-key the operator credential provisioned at setup")
 
     for name, help_text in (("select", "dry-run: who would serve the reduction"),
                             ("activate", "issue the reduction (writes activations)")):
@@ -175,11 +149,11 @@ def main() -> None:
         return revoke(args.serial, args.reason)
     if args.command == "crl":
         return show_crl()
-    if args.command == "init":
-        crt, _ = init_credential(force=args.force)
+    if args.command == "renew":
+        crt, _ = renew()
         subject = x509.load_pem_x509_certificate(
             Path(crt).read_bytes()).subject.rfc4514_string()
-        print(f"operator credential ready: {subject} ({crt})")
+        print(f"operator credential renewed: {subject} ({crt})")
         return
 
     body = {"power_w": args.power, "day": args.day,

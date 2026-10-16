@@ -221,7 +221,6 @@ def main():
     summary["first_poll"] = r.json()
 
     print("== phase 2: end-to-end DR event on the real appliance ==")
-    run_cli("backoffice/dr_operator.py", "init", "--force")
     day = av.DAYS[now_utc().weekday()]
     start = min(now_slot(), av.SLOTS_PER_DAY - 2)
     end = start + 2

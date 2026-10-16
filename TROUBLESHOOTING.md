@@ -94,7 +94,7 @@ would stop matching the artefact that is supposed to justify them.
 
 ## Do not regenerate the CA unless you have to
 
-`CA.crt` is copied into places that do not update themselves: the APK, the Pi,
-the operator credential and the VPP database. Regenerating it invalidates
+`CA.crt` is copied into places that do not update themselves: the APK, the Pi
+and the VPP database. Regenerating it invalidates
 every existing certificate. The full recovery order is the appendix of
 [RUNBOOK.md](RUNBOOK.md).

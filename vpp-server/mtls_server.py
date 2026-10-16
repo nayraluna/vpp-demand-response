@@ -189,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _is_operator(cert) -> bool:
-        """Role attribute OU=role=operator. Prototype limitation: the RA does not validate it at issuance."""
+        """Role attribute OU=role=operator, granted only on the CA host at setup."""
         roles = [a.value for a in cert.subject.get_attributes_for_oid(
             NameOID.ORGANIZATIONAL_UNIT_NAME)]
         return "role=operator" in roles

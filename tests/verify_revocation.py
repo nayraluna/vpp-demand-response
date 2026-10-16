@@ -4,6 +4,7 @@ import json
 import secrets
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -53,6 +54,17 @@ def write_pair(name: str, key, cert_pem: str):
     return str(cf), str(kf)
 
 
+def sign_on_ca_host(csr_pem: str) -> str:
+    """A role is granted only on the CA host, so the gate's operators are signed there, as at setup."""
+    with tempfile.TemporaryDirectory() as d:
+        csr_file, crt_file = Path(d) / "req.csr", Path(d) / "req.crt"
+        csr_file.write_text(csr_pem)
+        subprocess.run([sys.executable, str(ROOT / "ca" / "sign_csr.py"),
+                        "--csr", str(csr_file), "--out", str(crt_file)],
+                       check=True, capture_output=True)
+        return crt_file.read_text()
+
+
 def ra_identity(cn: str, role: str | None = None):
     key = ec.generate_private_key(ec.SECP256R1())
     attrs = [x509.NameAttribute(NameOID.COMMON_NAME, cn)]
@@ -60,12 +72,14 @@ def ra_identity(cn: str, role: str | None = None):
         attrs.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, f"role={role}"))
     csr = (x509.CertificateSigningRequestBuilder()
            .subject_name(x509.Name(attrs)).sign(key, hashes.SHA256()))
-    r = requests.post(f"{CA}/ra/issue",
-                      json={"csr": csr.public_bytes(serialization.Encoding.PEM).decode()},
-                      verify=CA_FILE)
-    if not r.ok:
-        die(f"/ra/issue -> {r.status_code} {r.text}")
-    pem = r.json()["certificate"]
+    csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode()
+    if role:
+        pem = sign_on_ca_host(csr_pem)
+    else:
+        r = requests.post(f"{CA}/ra/issue", json={"csr": csr_pem}, verify=CA_FILE)
+        if not r.ok:
+            die(f"/ra/issue -> {r.status_code} {r.text}")
+        pem = r.json()["certificate"]
     cert = x509.load_pem_x509_certificate(pem.encode())
     return key, pem, cert, format(cert.serial_number, "x")
 

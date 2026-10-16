@@ -18,6 +18,8 @@ from cryptography.x509.oid import NameOID
 ROOT = Path(__file__).resolve().parent.parent
 CERTS = ROOT / "certs"
 CA_FILE = str(CERTS / "CA.crt")
+# Provisioned at setup, the only place a role is granted.
+OPERATOR = (str(ROOT / "backoffice" / "operator.crt"), str(ROOT / "backoffice" / "operator.key"))
 DB_FILE = ROOT / "vpp-server" / "vpp.db"
 VPP, MTLS = "https://127.0.0.1:8080", "https://127.0.0.1:8443"
 CA, APP = "https://127.0.0.1:8081", "http://127.0.0.1:8082"
@@ -161,7 +163,7 @@ def main():
         calendar = open_calendar()
         ukey, ucert, uclient = ra_identity(f"user-{secrets.token_hex(3)}")
         ven = onboard(ukey, ucert, uclient, calendar)
-        _k, _c, operator = ra_identity(f"dr-{secrets.token_hex(3)}", "role=operator")
+        operator = OPERATOR
         window = current_window()
 
         print("G0: the appliance registers itself with the VTN on first contact")

@@ -104,8 +104,8 @@ def main():
             if stable(population.export_doc()) == stable(doc) \
             else die("imported population differs from the exported one")
 
-        print("G5: the RA issues the operator credential")
-        crt, key = dr_operator.init_credential(force=True)
+        print("G5: the operator renews its setup credential online and keeps the role")
+        crt, key = dr_operator.renew()
         cert = x509.load_pem_x509_certificate(Path(crt).read_bytes())
         ous = [a.value for a in cert.subject.get_attributes_for_oid(
             NameOID.ORGANIZATIONAL_UNIT_NAME)]

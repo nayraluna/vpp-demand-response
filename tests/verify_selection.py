@@ -17,6 +17,8 @@ from cryptography.x509.oid import NameOID
 ROOT = Path(__file__).resolve().parent.parent
 CERTS = ROOT / "certs"
 CA_FILE = str(CERTS / "CA.crt")
+# Provisioned at setup, the only place a role is granted.
+OPERATOR = (str(ROOT / "backoffice" / "operator.crt"), str(ROOT / "backoffice" / "operator.key"))
 VPP, MTLS = "https://127.0.0.1:8080", "https://127.0.0.1:8443"
 CA, APP = "https://127.0.0.1:8081", "http://127.0.0.1:8082"
 
@@ -186,7 +188,7 @@ def part_b():
     ok("an ordinary user is refused (403)") if r.status_code == 403 \
         else die(f"expected 403, got {r.status_code}")
 
-    _ok, _oc, operator = ra_identity(f"dr-{secrets.token_hex(3)}", "role=operator")
+    operator = OPERATOR
 
     print("B2: the operator gets a selection inside the declared window")
     r = requests.post(f"{MTLS}/dr/select", json=request, cert=operator, verify=CA_FILE)
