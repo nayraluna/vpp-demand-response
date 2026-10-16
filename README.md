@@ -21,7 +21,7 @@ The platform answers both with cryptography instead of surveillance. The user de
 | `android-app/` | User app: identity, pairing, availability, rewards | Kotlin, Jetpack Compose, Hilt |
 | `vpp-server/` | Coordinator, acts as the OpenADR **VTN** | Python, FastAPI + a mutual-TLS listener |
 | `appliance/` | The controllable load, acts as the OpenADR **VEN** | Python on a Raspberry Pi, software HSM |
-| `ca/` | Certificate authority and issuance service | Python, FastAPI |
+| `ca/` | Registration authority (validates) and certificate authority (signs) | Python, FastAPI |
 | `backoffice/` | Synthetic fleet and DR-operator CLI | Python |
 
 ![Deployment topology. The home network holds the mobile app and the appliance, the platform holds the CA and the VPP. Every connection is opened from the home outwards, so nothing reaches into the house.](docs/deployment-topology.png)
@@ -58,7 +58,7 @@ The user's key is generated in the Android Keystore and is non-exportable. The a
 powershell -ExecutionPolicy Bypass -File .\run_all.ps1
 ```
 
-16 gates, 202 checks. Every protocol step runs against its positive *and* its negative cases over the real stack, with real TLS and a real database: certificates outside the chain, invalid signatures, replayed activations, forged capacities, evidence submitted twice, revoked credentials at the mutual-TLS door, a client limited to TLS 1.2, a rolled-back revocation list, and a rolled-back calendar planted directly in the row the appliance polls.
+16 gates, 204 checks. Every protocol step runs against its positive *and* its negative cases over the real stack, with real TLS and a real database: certificates outside the chain, invalid signatures, replayed activations, forged capacities, evidence submitted twice, revoked credentials at the mutual-TLS door, a client limited to TLS 1.2, a rolled-back revocation list, and a rolled-back calendar planted directly in the row the appliance polls.
 
 `RegistrationFlowTest` drives the app's real protocol clients against the live servers from the JVM. `tests/verify_pi.py` runs a complete DR event against a Raspberry Pi over a real network (11 checks). Registration, QR pairing and DNIe login were completed on a physical phone.
 

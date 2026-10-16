@@ -16,7 +16,7 @@ from cryptography.x509.oid import NameOID
 HERE = Path(__file__).resolve().parent
 CERTS = HERE.parent / "certs"
 sys.path.insert(0, str(HERE))
-from app import ra_service, registry  # noqa: E402
+from app import ca_service, ra_service, registry  # noqa: E402
 
 ROOT_SUBJECT = x509.Name([
     x509.NameAttribute(NameOID.COMMON_NAME, "VPP Platform Root CA"),
@@ -83,7 +83,7 @@ def main() -> None:
     if registry.DB_FILE.exists():
         registry.DB_FILE.unlink()
         print("register wiped: certificates of the previous root no longer chain")
-    ra_service.initialize()
+    ca_service.initialize()
 
     tls_key = generate_key(args.algo)
     csr = x509.CertificateSigningRequestBuilder().subject_name(TLS_SUBJECT).sign(

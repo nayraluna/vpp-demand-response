@@ -1,25 +1,18 @@
+"""The Registration Authority: validates every request, holds no key.
+
+It checks what a request proves (possession of the key, a valid signer, the
+operator role) and what the register allows (no duplicate key, one live
+certificate per subject), then hands the approved request to the CA to sign.
+"""
 import base64
 import datetime
-import os
-from pathlib import Path
-
-import ipaddress
 
 import jwt
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import NameOID
-from cryptography.x509 import ReasonFlags
 
-from . import registry
-
-CERTS_DIR = Path(__file__).resolve().parent.parent.parent / "certs"
-CA_CERT_FILE = CERTS_DIR / "CA.crt"
-CA_KEY_FILE = CERTS_DIR / "CA.key"
-
-_ca_cert = None
-_ca_key = None
+from . import ca_service, registry
 
 
 class InvalidCSR(Exception):
@@ -38,32 +31,6 @@ class NotOperator(Exception):
     """A valid platform identity, but not one allowed to revoke."""
 
 
-# A relying party whose copy is older than this must refresh it, and refuses to act if it cannot.
-CRL_VALIDITY = datetime.timedelta(hours=24)
-# The CRL distribution point written into every leaf. It must resolve for any client that follows
-# it (Windows schannel does, and fails closed): loopback in development, the LAN address for a Pi.
-CRL_URL = os.environ.get("TFG_CRL_URL", "http://127.0.0.1:8083/ra/crl")
-
-
-# RFC 5280 reason codes by their RFC identifiers (keyCompromise, cACompromise, superseded, ...).
-# "unspecified" is accepted but encoded as no reason at all, as the RFC asks. certificateHold is
-# not offered: the register has no release path, so a hold here would be a permanent revocation.
-REASONS = {f.value: f for f in ReasonFlags
-           if f not in (ReasonFlags.unspecified, ReasonFlags.certificate_hold, ReasonFlags.remove_from_crl)}
-REASONS["unspecified"] = None
-
-
-def initialize() -> None:
-    global _ca_cert, _ca_key
-    _ca_cert = x509.load_pem_x509_certificate(CA_CERT_FILE.read_bytes())
-    _ca_key = serialization.load_pem_private_key(CA_KEY_FILE.read_bytes(), password=None)
-    registry.initialize()
-
-
-def ca_certificate_pem() -> str:
-    return _ca_cert.public_bytes(serialization.Encoding.PEM).decode()
-
-
 def _public_key_id(public_key) -> str:
     der = public_key.public_bytes(
         serialization.Encoding.DER,
@@ -74,36 +41,13 @@ def _public_key_id(public_key) -> str:
     return digest.finalize().hex()
 
 
-# The profile is picked by the CA from the channel the request came in on, never by the requester.
-PROFILES = {
-    "client": {"key_encipherment": False,
-               "eku": [x509.ExtendedKeyUsageOID.CLIENT_AUTH]},
-    "tls-server": {"key_encipherment": True,
-                   "eku": [x509.ExtendedKeyUsageOID.SERVER_AUTH]},
-    # The VPP: the same key is also provisioned for signing DR events.
-    "tls-server+signing": {"key_encipherment": True,
-                           "eku": [x509.ExtendedKeyUsageOID.SERVER_AUTH]},
-}
-
-
-def _san(names: list[str]) -> x509.SubjectAlternativeName:
-    entries = []
-    for n in names:
-        try:
-            entries.append(x509.IPAddress(ipaddress.ip_address(n)))
-        except ValueError:
-            entries.append(x509.DNSName(n))
-    return x509.SubjectAlternativeName(entries)
-
-
 def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
                    san: list[str] | None = None, supersedes: str | None = None) -> dict:
-    """Verify a CSR and issue a leaf certificate; `supersedes` names the serial a renewal replaces."""
-    if profile not in PROFILES:
+    """Validate a CSR and have the CA issue a leaf; `supersedes` names the serial a renewal replaces."""
+    if profile not in ca_service.PROFILES:
         raise InvalidCSR(f"unknown certificate profile {profile!r}")
     if san and not profile.startswith("tls-server"):
         raise InvalidCSR("only a TLS server certificate carries subjectAltName")
-    rules = PROFILES[profile]
     try:
         csr = x509.load_pem_x509_csr(csr_pem.encode())
     except Exception as e:
@@ -115,11 +59,10 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
     if not csr.subject.rdns:
         raise InvalidCSR("CSR has an empty subject")
     if sorted((a.oid.dotted_string, a.value) for a in csr.subject) == \
-            sorted((a.oid.dotted_string, a.value) for a in _ca_cert.subject):
+            sorted((a.oid.dotted_string, a.value) for a in ca_service.certificate().subject):
         raise InvalidCSR("CSR asks for the CA's own name")
 
-    public_key = csr.public_key()
-    key_id = _public_key_id(public_key)
+    key_id = _public_key_id(csr.public_key())
     already = registry.serial_for_key(key_id)
     if already:
         raise AlreadyEnrolled(f"public key already enrolled (serial {already})")
@@ -132,56 +75,7 @@ def issue_from_csr(csr_pem: str, days: int = 365, profile: str = "client",
     if live and live != supersedes:
         raise AlreadyEnrolled(f"subject already holds a live certificate (serial {live})")
 
-    serial = x509.random_serial_number()
-    not_after = now + datetime.timedelta(days=days)
-
-    # Extensions come from the profile, never from the CSR: the requester does not choose its own usage.
-    builder = (
-        x509.CertificateBuilder()
-        .subject_name(csr.subject)
-        .issuer_name(_ca_cert.subject)
-        .public_key(public_key)
-        .serial_number(serial)
-        # Five minutes of slack: a relying party whose clock runs behind must not refuse a fresh certificate.
-        .not_valid_before(now - datetime.timedelta(minutes=5))
-        .not_valid_after(not_after)
-        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-        .add_extension(
-            x509.KeyUsage(
-                digital_signature=True, content_commitment=False,
-                # Key transport is an RSA notion; an EC key never enciphers.
-                key_encipherment=rules["key_encipherment"] and isinstance(public_key, rsa.RSAPublicKey),
-                data_encipherment=False,
-                key_agreement=False, key_cert_sign=False, crl_sign=False,
-                encipher_only=False, decipher_only=False,
-            ),
-            critical=True,
-        )
-        .add_extension(x509.ExtendedKeyUsage(rules["eku"]), critical=False)
-        .add_extension(x509.SubjectKeyIdentifier.from_public_key(public_key), critical=False)
-        .add_extension(
-            x509.AuthorityKeyIdentifier.from_issuer_public_key(_ca_cert.public_key()),
-            critical=False,
-        )
-    )
-    if san:
-        builder = builder.add_extension(_san(san), critical=False)
-    builder = builder.add_extension(x509.CRLDistributionPoints([x509.DistributionPoint(
-        full_name=[x509.UniformResourceIdentifier(CRL_URL)],
-        relative_name=None, reasons=None, crl_issuer=None)]), critical=False)
-    cert = builder.sign(_ca_key, hashes.SHA256())
-
-    serial_hex = format(serial, "x")
-    pem = cert.public_bytes(serialization.Encoding.PEM).decode()
-    registry.record(serial_hex, key_id, cert.subject.rfc4514_string(), now, not_after, pem, profile)
-    if supersedes:
-        registry.revoke(supersedes, "superseded", by=cert.subject.rfc4514_string())
-    return {
-        "certificate": pem,
-        "subject": cert.subject.rfc4514_string(),
-        "serial": serial_hex,
-        "not_after": not_after.isoformat(),
-    }
+    return ca_service.sign_leaf(csr, key_id, profile, san, days, supersedes, now)
 
 
 def refuse_requested_role(csr_pem: str) -> None:
@@ -197,12 +91,13 @@ def refuse_requested_role(csr_pem: str) -> None:
 
 def _issued_here(cert: x509.Certificate) -> bool:
     """Signed by this CA, the root still valid, the leaf an end entity that may sign."""
+    root = ca_service.certificate()
     try:
-        cert.verify_directly_issued_by(_ca_cert)
+        cert.verify_directly_issued_by(root)
         now = datetime.datetime.now(datetime.timezone.utc)
-        if not (_ca_cert.not_valid_before_utc <= now <= _ca_cert.not_valid_after_utc):
+        if not (root.not_valid_before_utc <= now <= root.not_valid_after_utc):
             return False
-        if not _ca_cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
+        if not root.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
             return False
         # The leaf must be an end entity allowed to sign, not a CA certificate used as one.
         if cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
@@ -250,8 +145,8 @@ def verify_revocation_request(token: str) -> dict:
     except ValueError as e:
         raise InvalidRequest(str(e))
     reason = str(payload.get("reason") or "unspecified")
-    if reason not in REASONS:
-        raise InvalidRequest(f"unknown revocation reason {reason!r}, use one of {sorted(REASONS)}")
+    if reason not in ca_service.REASONS:
+        raise InvalidRequest(f"unknown revocation reason {reason!r}, use one of {sorted(ca_service.REASONS)}")
     return {"serial": serial, "reason": reason,
             "requested_by": signer.subject.rfc4514_string()}
 
@@ -276,23 +171,3 @@ def renew_from_request(token: str) -> dict:
     old_serial = format(signer.serial_number, "x")
     issued = issue_from_csr(csr_pem, supersedes=old_serial)
     return {**issued, "superseded": old_serial, "crl_number": registry.crl_number()}
-
-
-def crl_der() -> bytes:
-    """The RFC 5280 CRL signed with the CA key: CRLNumber, AKI, and a reason per entry."""
-    now = datetime.datetime.now(datetime.timezone.utc)
-    builder = (x509.CertificateRevocationListBuilder()
-               .issuer_name(_ca_cert.subject)
-               .last_update(now)
-               .next_update(now + CRL_VALIDITY)
-               .add_extension(x509.CRLNumber(registry.crl_number()), critical=False)
-               .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(_ca_cert.public_key()),
-                              critical=False))
-    for e in registry.revoked(now):
-        entry = (x509.RevokedCertificateBuilder()
-                 .serial_number(int(e["serial"], 16))
-                 .revocation_date(datetime.datetime.fromisoformat(e["revoked_at"])))
-        if REASONS.get(e["reason"]):
-            entry = entry.add_extension(x509.CRLReason(REASONS[e["reason"]]), critical=False)
-        builder = builder.add_revoked_certificate(entry.build())
-    return builder.sign(_ca_key, hashes.SHA256()).public_bytes(serialization.Encoding.DER)

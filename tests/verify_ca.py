@@ -126,6 +126,17 @@ def main():
         if r.status_code == 400 and "role" in r.text \
         else die(f"expected 400 on a requested role, got {r.status_code} {r.text}")
 
+    print("G5: the RA validates, the CA signs")
+    ra_source = (ROOT / "ca" / "app" / "ra_service.py").read_text(encoding="utf-8")
+    ok("the RA module never opens the CA key (no CA.key, no private key loader)") \
+        if "CA.key" not in ra_source and "load_pem_private_key" not in ra_source \
+        and "CA_KEY" not in ra_source \
+        else die("ra_service.py touches the CA key")
+    ok("only ca_service.py signs certificates and the CRL") \
+        if ".sign(_ca_key" not in ra_source \
+        and (ROOT / "ca" / "app" / "ca_service.py").read_text(encoding="utf-8").count(".sign(_ca_key") == 2 \
+        else die("signing happens outside ca_service.py")
+
     print(f"\nCERTIFICATE ISSUANCE COMPLETE: {passed} checks passed.")
 
 

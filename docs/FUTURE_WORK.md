@@ -7,15 +7,17 @@ the fix. Grouped by area, the PKI first.
 
 ## PKI
 
-### RA and CA are one process, and the root key is online
-`ca/app/ra_service.py` loads `certs/CA.key` and signs leaves directly. The
-Registration Authority (request validation, identity vetting) and the
-Certification Authority (holder of the signing key) are one process on an
-internet facing host, and the root key is a PEM file beside the leaves.
+### The RA and the CA share a process, and the root key is online
+`ca/app/ra_service.py` validates every request and holds no key, and
+`ca/app/ca_service.py` is the only module that loads `certs/CA.key`, signs
+leaves and the CRL, and writes the register. They still run in one process on
+the internet facing host, so a compromise of that host reaches the key, and the
+root is a PEM file beside the leaves.
 
-Production: offline root, online issuing sub CA with its key in an HSM, and the
-RA as a separate front office with no access to any CA key. A compromise of the
-RA host must not allow minting certificates. Large.
+Production: offline root, an issuing CA per trust domain with its key in an
+HSM, and the RA as a separate host that reaches the platform issuing CA over a
+private channel. The module boundary is already the one that split would cut
+along. Large.
 
 ### Issuance verifies possession, not identity
 `/ra/issue` accepts any well formed CSR whose self signature verifies, whose
